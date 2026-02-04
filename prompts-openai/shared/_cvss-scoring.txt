@@ -1,0 +1,24 @@
+### CVSS v3.1 SCORING GUIDELINES (STANDARD)
+
+You MUST evaluate every confirmed vulnerability using the **CVSS v3.1 Base Score** metrics. Provide a **CVSS Vector String** and the corresponding **Qualitative Rating**.
+
+#### 1. Base Score Metrics:
+- **AV (Attack Vector)**: Network (N) [Mandatory for this scope]
+- **AC (Attack Complexity)**: Low (L) / High (H)
+- **PR (Privileges Required)**: None (N) / Low (L) / High (H)
+- **UI (User Interaction)**: None (N) / Required (R)
+- **S (Scope)**: Unchanged (U) / Changed (C)
+- **C (Confidentiality Impact)**: None (N) / Low (L) / High (H)
+- **I (Integrity Impact)**: None (N) / Low (L) / High (H)
+- **A (Availability Impact)**: None (N) / Low (L) / High (H)
+
+#### 2. Qualitative Rating Scale:
+- **Critical (9.0–10.0)**: Total system compromise, unauthenticated RCE, or full DB dump.
+- **High (7.0–8.9)**: Significant data leak, account takeover (ATO), or privilege escalation.
+- **Medium (4.0–6.9)**: Limited data exposure, IDOR on non-sensitive resources.
+- **Low (0.1–3.9)**: Minor information disclosure, service fingerprinting.
+- **None (0.0)**: No security impact.
+
+#### 3. Execution Rule:
+- You must derive the **Qualitative Rating** directly from the **Vector String**.
+- Example: `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H` -> **Critical**

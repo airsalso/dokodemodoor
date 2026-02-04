@@ -1,0 +1,8 @@
+.dokodemodoor-store.json
+audit-logs
+agent-logs
+deliverables
+mcp-server/node_modules
+node_modules
+prompts-openai/bak
+repos

@@ -1,0 +1,138 @@
+/**
+ * save_deliverable MCP Tool
+ *
+ * Saves deliverable files with automatic validation.
+ * Replaces tools/save_deliverable.js bash script.
+ */
+
+import { tool } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
+import { DeliverableType, DELIVERABLE_FILENAMES, isQueueType, isEvidenceType } from '../types/deliverables.js';
+import { createToolResult } from '../types/tool-responses.js';
+import { validateQueueJson } from '../validation/queue-validator.js';
+import { validateEvidenceJson } from '../validation/evidence-validator.js';
+import { saveDeliverableFile } from '../utils/file-operations.js';
+import { createValidationError, createGenericError } from '../utils/error-formatter.js';
+
+/**
+ * Input schema for save_deliverable tool
+ */
+export const SaveDeliverableInputSchema = z.object({
+  deliverable_type: z.nativeEnum(DeliverableType).describe('Type of deliverable to save'),
+  content: z.string().min(1).describe('File content (markdown for analysis/evidence, JSON for queues)'),
+});
+
+/**
+ * save_deliverable tool implementation
+ *
+ * @param {Object} args
+ * @param {string} args.deliverable_type - Type of deliverable to save
+ * @param {string} args.content - File content
+ * @returns {Promise<Object>} Tool result
+ */
+/**
+* [목적] 유효성 검사를 거쳐 전달 가능한 파일을 저장하고 표준화된 도구 응답을 반환합니다.
+*
+* [호출 경로]
+* - mcp-server/src/tools/tool-registry.js::registerMCPTools()는 이 핸들러를 등록합니다.
+* - 컨텍스트: AI 에이전트의 MCP 도구 호출(save_deliverable)을 통해 호출됩니다.
+*
+* [출력 대상]
+* - 도구 레지스트리/에이전트 실행기에서 사용하는 ToolResult 객체를 반환합니다.
+* - saveDeliverableFile()을 통해 대상 저장소 deliverables/에 파일을 저장합니다.
+*
+* [입력 매개변수]
+* - args.deliverable_type (문자열): 전달 가능한 파일 유형 열거형.
+* - args.content (문자열): Markdown 또는 JSON 콘텐츠.
+*
+* [반환 값]
+* - Promise<Object>: 상태/메시지/경로가 포함된 표준화된 도구 결과.
+*
+* [부작용]
+* - 파일 시스템이 전달물 디렉터리에 기록됩니다.
+*
+* [의존성]
+* - validateQueueJson(), saveDeliverableFile(), DeliverableType 매핑.
+*
+* [흐름]
+* - 전달물 유형이 큐인 경우 큐 JSON을 검증합니다.
+* - 전달물 유형에서 파일 이름을 확인하고 파일을 기록합니다.
+* - 성공 또는 형식화된 오류 결과를 반환합니다.
+*
+* [오류 처리]
+* - 유효성 검사 오류는 구조화된 도구 오류(비예외)를 반환합니다.
+* - 예상치 못한 오류는 포착하여 일반 오류로 래핑합니다.
+*
+* [참고]
+* - saveDeliverableFile() 함수는 내용이 짧은 대용량 파일을 덮어쓰는 것을 방지합니다.
+**/
+export async function saveDeliverable(args) {
+  try {
+    const { deliverable_type, content } = args;
+
+    // Validate queue JSON if applicable
+    if (isQueueType(deliverable_type)) {
+      const queueValidation = validateQueueJson(content);
+      if (!queueValidation.valid) {
+        const errorResponse = createValidationError(
+          queueValidation.message,
+          true,
+          {
+            deliverableType: deliverable_type,
+            expectedFormat: '{"vulnerabilities": [...]}',
+          }
+        );
+        return createToolResult(errorResponse);
+      }
+    }
+
+    // Validate evidence JSON if applicable
+    if (isEvidenceType(deliverable_type)) {
+      const evidenceValidation = validateEvidenceJson(content);
+      if (!evidenceValidation.valid) {
+        const errorResponse = createValidationError(
+          evidenceValidation.message,
+          true,
+          {
+            deliverableType: deliverable_type,
+            expectedFormat: '{"vulnerability_id": "...", "evidence": [...], "reproduction_steps": [...]}',
+          }
+        );
+        return createToolResult(errorResponse);
+      }
+    }
+
+    // Get filename and save file
+    const filename = DELIVERABLE_FILENAMES[deliverable_type];
+    const { filepath, filename: finalFilename } = saveDeliverableFile(filename, content);
+
+    // Success response
+    const successResponse = {
+      status: 'success',
+      message: `Deliverable saved successfully: ${finalFilename}`,
+      filepath,
+      deliverableType: deliverable_type,
+      validated: isQueueType(deliverable_type) || isEvidenceType(deliverable_type),
+    };
+
+    return createToolResult(successResponse);
+  } catch (error) {
+    const errorResponse = createGenericError(
+      error,
+      false,
+      { deliverableType: args.deliverable_type }
+    );
+
+    return createToolResult(errorResponse);
+  }
+}
+
+/**
+ * Tool definition for MCP server - created using SDK's tool() function
+ */
+export const saveDeliverableTool = tool(
+  'save_deliverable',
+  'Saves deliverable files with automatic validation. Queue files must have {"vulnerabilities": [...]} structure.',
+  SaveDeliverableInputSchema.shape,
+  saveDeliverable
+);

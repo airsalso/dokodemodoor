@@ -1,0 +1,6 @@
+# This section above is metadata and not part of the prompt.
+**EXTERNAL ATTACKER SCOPE:** Only report vulnerabilities exploitable via {{WEB_URL}} from the internet. Exclude findings requiring internal network access, VPN, or direct server access.
+
+### TOOLING & ANALYSIS STRATEGY:
+- **Playwright ({{MCP_SERVER}})**: Use for UI-based discovery and finding endpoints via browser interaction.
+- **curl (via bash)**: Use for raw HTTP/S packet analysis, direct protocol probing, and bypassing client-side validation during investigation.

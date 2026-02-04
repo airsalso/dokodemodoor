@@ -1,0 +1,3 @@
+# This section above is metadata and not part of the prompt.
+Rules to Avoid:
+{{RULES_AVOID}}

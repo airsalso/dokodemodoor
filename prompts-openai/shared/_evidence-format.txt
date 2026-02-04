@@ -1,0 +1,59 @@
+### STANDARDIZED EVIDENCE FORMAT (MANDATORY)
+
+You MUST save all exploitation evidence as a **JSON object** using the `save_deliverable` tool with the appropriate `*_EVIDENCE` type. This enables automated verification and reporting.
+
+**JSON Schema Requirements:**
+The top-level object must contain a `vulnerabilities` array, even if there is only one finding.
+
+```json
+{
+  "vulnerabilities": [
+    {
+      "vulnerability_id": "ID-From-Queue (e.g., AUTH-VULN-01)",
+      "vulnerability_name": "Human Readable Name",
+      "verdict": "EXPLOITED | BLOCKED_BY_SECURITY | POTENTIAL",
+      "evidence": [
+        {
+          "type": "http_request_response",
+          "description": "Initial login attempt",
+          "request": {
+            "method": "POST",
+            "url": "https://...",
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"user\":\"admin\"}"
+          },
+          "response": {
+            "status": 200,
+            "headers": { "Set-Cookie": "session=..." },
+            "body": "{\"status\":\"success\"}"
+          }
+        },
+        {
+          "type": "screenshot",
+          "description": "Visual proof of impact",
+          "path": "deliverables/findings/[vuln-type]/screenshot.png"
+        },
+        {
+          "type": "session_state",
+          "description": "Captured session markers",
+          "cookies": [ { "name": "session", "value": "[REDACTED]" } ],
+          "localStorage": { "token": "[REDACTED]" }
+        }
+      ],
+      "reproduction_steps": [
+        "1. Open login page",
+        "2. Intercept request...",
+        "3. ..."
+      ],
+      "impact_summary": "Successfully bypassed MFA by manipulating the 'step' parameter in the login flow."
+    }
+  ]
+}
+```
+
+**CRITICAL RULES:**
+1. **JSON Only**: The `content` parameter for `save_deliverable` MUST be a valid JSON string when saving `*_EVIDENCE` types.
+2. **Full context**: Every HTTP request must include the full URL and all necessary headers.
+3. **Sensitive data**: Mask passwords/codes with `[REDACTED]`.
+4. **Tooling**: Use `TaskAgent` to automate evidence collection where possible.
+5. **Screenshots**: If you use Playwright, ALWAYS take a screenshot of the final success state and include it in the JSON.

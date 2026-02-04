@@ -1,0 +1,1 @@
+For fast filename discovery, prefer `list_files` with a query and path (e.g., `list_files({"query":"router","path":"."})`).

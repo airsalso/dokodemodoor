@@ -1,0 +1,13 @@
+- TaskAgent: max **2 times per (endpoint + parameter + sink/client)**
+- **NO-DUPLICATION**: Do not search for the same keyword or Sink in the same directory more than twice. Check your history before searching.
+- After 3 failed attempts to locate a pattern → mark **not found in production** and move on
+- **RECON-TRUST**: Trust the paths and endpoints provided in your context. Do NOT use `ls` or `cat` just to verify existence. Proceed directly to analysis/testing.
+- **DIRECT-HIT**: Use targeted multi-keyword searches (e.g., `search_file query: "sink condition"`) instead of broad keyword searches.
+- **IGNORE-ARTIFACTS**: Never search or read files in `audit-logs/`, `deliverables/`, `reports/`, `node_modules/`, or any `*.log`, `*.bak`, `*.tmp`, `*.json` (if in root) files. These are external to the attack surface.
+- **NO-REDUNDANCY**: If you have already analyzed a file and found no vulnerability, do not open it again.
+- **FOCUS-ON-EXPLOITABLE**: Prioritize sinks that are reachable from the network (as identified in recon). Skip background tasks or internal-only utilities.
+- **BASH-PRECISION**: When using `bash` or `run_command` tools, the `command` argument must be a **plain string**. Do NOT wrap the command in JSON (e.g., `{"command": "..."}`) inside the tool call. Example correct usage: `{"command": "curl http://..."}`.
+- **TIME-DISCIPLINE**: If turn count is > 80% (e.g., 40/50 or 80/100), STOP all new discovery. Immediately compile findings and call `save_deliverable` (Analysis + Queue).
+- **AMBIGUITY-HANDLING**: If a file search or open fails twice, assume the path is dynamic or removed. Mark as "Untestable" in findings and move to the next task.
+- **SINK-BATCHING**: When multiple endpoints use the same controller/logic, analyze the controller ONCE and apply findings to all related endpoints.
+

@@ -1,0 +1,1 @@
+**Path Awareness:** All deliverable and findings files live under the `deliverables/` directory. Always use relative paths like `deliverables/[filename]` (never absolute paths).

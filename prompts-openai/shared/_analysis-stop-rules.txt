@@ -1,0 +1,4 @@
+You may conclude the phase only when **all** conditions hold:
+1) All Recon- or Code Analysis–derived Todo items are completed (or explicitly marked not found).
+2) All **new** network-reachable sinks discovered during tracing are completed (or explicitly marked not found).
+3) **No new sinks** are discovered after 3 consecutive tracing attempts.
