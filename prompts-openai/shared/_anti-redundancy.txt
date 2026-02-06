@@ -1,0 +1,17 @@
+# ANTI-REDUNDANCY & CATEGORY ISOLATION RULES (NON-NEGOTIABLE)
+
+1. **STRICT CATEGORY FILTERING**: You are a specialist. You MUST ONLY report findings that fall strictly within your assigned category (e.g., AuthZ, SQLI, SSRF).
+2. **ZERO TOLERANCE FOR OVERLAP**:
+   - DO NOT report SQL Injection (SQLI).
+   - DO NOT report Cross-Site Scripting (XSS).
+   - DO NOT report Server-Side Request Forgery (SSRF) or Open Redirects.
+   - DO NOT report File System Abuse / Path Traversal (PATHI).
+   - DO NOT report Code/Command Injection (CODEI).
+   - DO NOT report Template Injection (SSTI).
+   - DO NOT report Authentication failures (AuthN) like cookie flags or password policy.
+3. **NO TABLE SUMMARIZATION**: DO NOT summarize "Endpoint Inventory" tables or "General Reconnaissance" sections. These are already documented in the Recon deliverable. Your report must ONLY contain deep analysis of your specific target category.
+4. **REPORT TITLE RESTRICTION**: Your report title MUST reflect your category (e.g., "[Category] Security Analysis"). DO NOT use generic titles like "Security Assessment Report" or "Final Report".
+5. **RECON DATA HYGIENE**: Even if the `recon_deliverable.md` contains findings from other categories, you MUST filter them out. Use the recon file ONLY to discover your specific targets (e.g., for AuthZ, only use "Authorization Vulnerability Candidates").
+6. **NO SYNTHESIS**: Do not attempt to summarize the entire project's security posture. Focus exclusively on the technical depth of your assigned domain.
+
+**VIOLATION WARNING**: Including findings from other categories or summarizing general inventories leads to redundant reports and is considered a failure of specialist discipline.

@@ -345,7 +345,7 @@ export async function registerMCPTools() {
   );
 
   // Common aliases for main agent as well
-  const bashAliases = ['grep', 'search_file', 'open_file', 'read_file', 'ls', 'find', 'list_files'];
+  const bashAliases = ['grep', 'search_file', 'open_file', 'read_file', 'ls', 'find', 'list_files', 'rg'];
   for (const alias of bashAliases) {
     toolRegistry.register(
       alias,
@@ -379,14 +379,41 @@ export async function registerMCPTools() {
         };
 
         // Path normalization: Safe guarding against LLM omitting leading slash on absolute paths.
-        if (p.path && !p.path.startsWith('/')) {
+        if (p.path) {
           const targetDir = getTargetDir();
-          const correctedPath = '/' + p.path;
 
-          // Only normalize if the path DOES NOT exist relatively BUT would exist/match if absolute
-          if (!fs.existsSync(p.path) && correctedPath.includes(targetDir)) {
-            p.path = correctedPath;
-            console.log(chalk.gray(`      🔧 Context-aware path normalization: ${p.path}`));
+          // Resolve relative paths against repo root
+          if (!path.isAbsolute(p.path)) {
+            const absCandidate = path.resolve(targetDir, p.path);
+            if (fs.existsSync(absCandidate)) {
+              p.path = absCandidate;
+              console.log(chalk.gray(`      🔧 Auto-resolved path: ${p.path}`));
+            }
+          }
+
+          // If still missing, attempt basename recovery via rg --files
+          if (!fs.existsSync(p.path)) {
+            try {
+              const { execSync } = await import('child_process');
+              const base = path.basename(p.path);
+              const cmd = `rg --files -g '*${base}*' ${shQuote(targetDir)} | head -n 1`;
+              const match = execSync(cmd, { encoding: 'utf8' }).trim();
+              if (match) {
+                p.path = match;
+                console.log(chalk.gray(`      🔧 Auto-recovered path: ${p.path}`));
+              }
+            } catch (e) {
+              // Best-effort fallback; keep original path if anything fails.
+            }
+          }
+
+          // Legacy normalization for absolute-like paths missing leading slash
+          if (!p.path.startsWith('/')) {
+            const correctedPath = '/' + p.path;
+            if (!fs.existsSync(p.path) && correctedPath.includes(targetDir)) {
+              p.path = correctedPath;
+              console.log(chalk.gray(`      🔧 Context-aware path normalization: ${p.path}`));
+            }
           }
         }
 
@@ -442,14 +469,21 @@ export async function registerMCPTools() {
             const rgExcludes = excludes.map(e => `-g '!${e}'`).join(' ');
             const grepExcludes = excludes.map(e => `--exclude-dir=${shQuote(e)}`).join(' ');
 
+            const regexMeta = /[()[\]{}.+*?^$|\\]/;
+            const useFixed = regexMeta.test(p.query);
+
             if (global.__DOKODEMODOOR_RG_AVAILABLE) {
-              if (words.length > 1) {
+              if (useFixed) {
+                cmd = `rg -n --no-heading --color never ${rgExcludes} -F ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
+              } else if (words.length > 1) {
                 cmd = `rg -n --no-heading --color never ${rgExcludes} -P ${shQuote(searchableQuery)} ${shQuote(targetPath)} | head -n ${max}`;
               } else {
                 cmd = `rg -n --no-heading --color never ${rgExcludes} ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
               }
             } else {
-              if (words.length > 1) {
+              if (useFixed) {
+                cmd = `grep -rn ${grepExcludes} -F -- ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
+              } else if (words.length > 1) {
                 let grepChain = `grep -rn ${grepExcludes} -- . ${shQuote(targetPath)}`;
                 for (const word of words) {
                   grepChain += ` | grep -i ${shQuote(word)}`;
@@ -504,7 +538,7 @@ export async function registerMCPTools() {
         // AUTO-FIX: If we have a path but the command (like sed, cat, head, tail) doesn't contain it, append it.
         // DO NOT auto-fix if command contains a pipe, as appending at the end is usually wrong for piped commands.
         if (p.path && cmd && !cmd.includes('|')) {
-          const commonTools = ['cat', 'sed', 'head', 'tail', 'grep', 'wc', 'strings'];
+          const commonTools = ['cat', 'sed', 'head', 'tail', 'grep', 'wc', 'strings', 'ls', 'find'];
           const firstWord = cmd.trim().split(/\s+/)[0];
 
           if (commonTools.includes(firstWord)) {
@@ -613,5 +647,3 @@ export async function registerRemoteMCPTools(mcpServers) {
 
   console.log(chalk.blue(`    📦 Total tools registered: ${toolRegistry.tools.size}`));
 }
-
-

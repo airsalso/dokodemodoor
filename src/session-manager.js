@@ -69,63 +69,70 @@ export const AGENTS = Object.freeze({
     order: 4,
     prerequisites: ['recon']
   },
+  'api-fuzzer': {
+    name: 'api-fuzzer',
+    displayName: 'API Fuzzer agent',
+    phase: 'api-fuzzing',
+    order: 5,
+    prerequisites: ['recon-verify']
+  },
 
   // Phase 3 - Vulnerability Analysis
   'sqli-vuln': {
     name: 'sqli-vuln',
     displayName: 'SQL Injection vuln agent',
     phase: 'vulnerability-analysis',
-    order: 5,
-    prerequisites: ['recon-verify']
+    order: 6,
+    prerequisites: ['api-fuzzer']
   },
   'codei-vuln': {
     name: 'codei-vuln',
     displayName: 'Code Injection vuln agent',
     phase: 'vulnerability-analysis',
-    order: 6,
-    prerequisites: ['recon-verify']
+    order: 7,
+    prerequisites: ['api-fuzzer']
   },
   'ssti-vuln': {
     name: 'ssti-vuln',
     displayName: 'SSTI vuln agent',
     phase: 'vulnerability-analysis',
-    order: 7,
-    prerequisites: ['recon-verify']
+    order: 8,
+    prerequisites: ['api-fuzzer']
   },
   'pathi-vuln': {
     name: 'pathi-vuln',
     displayName: 'Path Injection vuln agent',
     phase: 'vulnerability-analysis',
-    order: 8,
-    prerequisites: ['recon-verify']
+    order: 9,
+    prerequisites: ['api-fuzzer']
   },
   'xss-vuln': {
     name: 'xss-vuln',
     displayName: 'XSS vuln agent',
     phase: 'vulnerability-analysis',
-    order: 9,
-    prerequisites: ['recon-verify']
+    order: 10,
+    prerequisites: ['api-fuzzer']
   },
   'auth-vuln': {
     name: 'auth-vuln',
     displayName: 'Auth vuln agent',
     phase: 'vulnerability-analysis',
-    order: 10,
-    prerequisites: ['recon-verify']
+    order: 11,
+    prerequisites: ['api-fuzzer']
   },
   'ssrf-vuln': {
     name: 'ssrf-vuln',
     displayName: 'SSRF vuln agent',
     phase: 'vulnerability-analysis',
-    order: 11,
-    prerequisites: ['recon-verify']
+    order: 12,
+    prerequisites: ['api-fuzzer']
   },
   'authz-vuln': {
     name: 'authz-vuln',
     displayName: 'Authz vuln agent',
     phase: 'vulnerability-analysis',
-    order: 12,
-    prerequisites: ['recon-verify']
+    order: 13,
+    prerequisites: ['api-fuzzer']
   },
 
   // Phase 4 - Exploitation
@@ -133,56 +140,56 @@ export const AGENTS = Object.freeze({
     name: 'sqli-exploit',
     displayName: 'SQL Injection exploit agent',
     phase: 'exploitation',
-    order: 13,
+    order: 14,
     prerequisites: ['sqli-vuln']
   },
   'codei-exploit': {
     name: 'codei-exploit',
     displayName: 'Code Injection exploit agent',
     phase: 'exploitation',
-    order: 14,
+    order: 15,
     prerequisites: ['codei-vuln']
   },
   'ssti-exploit': {
     name: 'ssti-exploit',
     displayName: 'SSTI exploit agent',
     phase: 'exploitation',
-    order: 15,
+    order: 16,
     prerequisites: ['ssti-vuln']
   },
   'pathi-exploit': {
     name: 'pathi-exploit',
     displayName: 'Path Injection exploit agent',
     phase: 'exploitation',
-    order: 16,
+    order: 17,
     prerequisites: ['pathi-vuln']
   },
   'xss-exploit': {
     name: 'xss-exploit',
     displayName: 'XSS exploit agent',
     phase: 'exploitation',
-    order: 17,
+    order: 18,
     prerequisites: ['xss-vuln']
   },
   'auth-exploit': {
     name: 'auth-exploit',
     displayName: 'Auth exploit agent',
     phase: 'exploitation',
-    order: 18,
+    order: 19,
     prerequisites: ['auth-vuln']
   },
   'ssrf-exploit': {
     name: 'ssrf-exploit',
     displayName: 'SSRF exploit agent',
     phase: 'exploitation',
-    order: 19,
+    order: 20,
     prerequisites: ['ssrf-vuln']
   },
   'authz-exploit': {
     name: 'authz-exploit',
     displayName: 'Authz exploit agent',
     phase: 'exploitation',
-    order: 20,
+    order: 21,
     prerequisites: ['authz-vuln']
   },
 
@@ -191,7 +198,7 @@ export const AGENTS = Object.freeze({
     name: 'report',
     displayName: 'Report agent',
     phase: 'reporting',
-    order: 21,
+    order: 22,
     prerequisites: ['authz-exploit']
   },
 
@@ -200,15 +207,17 @@ export const AGENTS = Object.freeze({
     name: 'osv-analysis',
     displayName: 'OSV Analysis agent',
     phase: 'osv-analysis',
-    order: 22,
+    order: 23,
     prerequisites: []
   }
+
 });
 
 // Phase definitions
 export const PHASES = Object.freeze({
   'pre-reconnaissance': ['pre-recon'],
   'reconnaissance': ['login-check', 'recon', 'recon-verify'],
+  'api-fuzzing': ['api-fuzzer'],
   'vulnerability-analysis': ['sqli-vuln', 'codei-vuln', 'ssti-vuln', 'pathi-vuln', 'xss-vuln', 'auth-vuln', 'ssrf-vuln', 'authz-vuln'],
   'exploitation': ['sqli-exploit', 'codei-exploit', 'ssti-exploit', 'pathi-exploit', 'xss-exploit', 'auth-exploit', 'ssrf-exploit', 'authz-exploit'],
   'reporting': ['report'],
@@ -218,11 +227,13 @@ export const PHASES = Object.freeze({
 export const PHASE_ORDER = Object.freeze([
   'pre-reconnaissance',
   'reconnaissance',
+  'api-fuzzing',
   'vulnerability-analysis',
   'exploitation',
   'reporting',
   'osv-analysis'
 ]);
+
 
 /**
  * [목적] 에이전트 이름을 단계 순서 인덱스로 매핑.
@@ -424,9 +435,13 @@ export const createSession = async (webUrl, repoPath, configFile = null, targetR
       ]).size;
       console.log(chalk.gray(`   Progress: ${completedCount}/${Object.keys(AGENTS).length} agents completed`));
 
-      // Update last activity timestamp
-      await updateSession(existingSession.id, { lastActivity: getLocalISOString() });
+      // Update last activity and ensure status is 'in-progress' upon reuse
+      await updateSession(existingSession.id, {
+        status: 'in-progress',
+        lastActivity: getLocalISOString()
+      });
       return existingSession;
+
     }
 
     // If completed, create a new session (allows re-running after completion)
@@ -447,6 +462,7 @@ export const createSession = async (webUrl, repoPath, configFile = null, targetR
     completedAgents: [],
     skippedAgents: [],
     failedAgents: [],
+    runningAgents: [],
     checkpoints: {},
     createdAt: getLocalISOString(),
     lastActivity: getLocalISOString()
@@ -456,8 +472,44 @@ export const createSession = async (webUrl, repoPath, configFile = null, targetR
   store.sessions[sessionId] = session;
   await saveSessions(store);
 
+  // Auto-cleanup stale sessions on new session creation
+  // This handles sessions that were 'in-progress' but crashed/killed without cleanup
+  await cleanupStaleSessions(sessionId);
+
   return session;
 };
+
+/**
+ * [목적] 장시간 활동이 없는 'in-progress' 세션들을 'interrupted'로 정리.
+ *
+ * @param {string} currentSessionId - 현재 실행 중인 세션 ID (정리 대상에서 제외)
+ */
+export const cleanupStaleSessions = async (currentSessionId = null) => {
+  const store = await loadSessions();
+  let updated = false;
+  const now = new Date();
+  const STALE_THRESHOLD_MS = 1000 * 60 * 60; // 60 minutes (1 hour)
+
+
+  for (const id in store.sessions) {
+    if (id === currentSessionId) continue;
+
+    const session = store.sessions[id];
+    if (session.status === 'in-progress') {
+      const lastActivity = session.lastActivity ? new Date(session.lastActivity) : new Date(session.createdAt);
+      if (now - lastActivity > STALE_THRESHOLD_MS) {
+        session.status = 'interrupted';
+        updated = true;
+        console.log(chalk.gray(`    🧹 Auto-cleaned stale session: ${id.substring(0, 8)} (marked as interrupted)`));
+      }
+    }
+  }
+
+  if (updated) {
+    await saveSessions(store);
+  }
+};
+
 
 // Get session by ID
 /**
@@ -508,25 +560,34 @@ export const getSession = async (sessionId) => {
  * - Writes session store to disk.
  */
 export const updateSession = async (sessionId, updates) => {
-  const store = await loadSessions();
+  // Use lock to ensure atomic update
+  const unlock = await sessionMutex.lock(sessionId);
+  try {
+    const store = await loadSessions();
 
-  if (!store.sessions[sessionId]) {
-    throw new PentestError(
-      `Session ${sessionId} not found`,
-      'validation',
-      false,
-      { sessionId }
-    );
+    if (!store.sessions[sessionId]) {
+      throw new PentestError(
+        `Session ${sessionId} not found`,
+        'validation',
+        false,
+        { sessionId }
+      );
+    }
+
+    // Preserve the current state before applying updates
+    const currentState = store.sessions[sessionId];
+
+    store.sessions[sessionId] = {
+      ...currentState,
+      ...updates,
+      lastActivity: getLocalISOString()
+    };
+
+    await saveSessions(store);
+    return store.sessions[sessionId];
+  } finally {
+    unlock();
   }
-
-  store.sessions[sessionId] = {
-    ...store.sessions[sessionId],
-    ...updates,
-    lastActivity: getLocalISOString()
-  };
-
-  await saveSessions(store);
-  return store.sessions[sessionId];
 };
 
 // List all sessions
@@ -878,44 +939,36 @@ export const getNextAgent = (session) => {
  * - Writes session store; uses session mutex for concurrency.
  */
 export const markAgentCompleted = async (sessionId, agentName, checkpointCommit) => {
-  // Use mutex to prevent race conditions during parallel agent execution
-  const unlock = await sessionMutex.lock(sessionId);
+  validateAgent(agentName);
 
-  try {
-    // Get fresh session data under lock
-    const session = await getSession(sessionId);
-    if (!session) {
-      throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
-    }
-
-    validateAgent(agentName);
-
-    const updates = {
-      completedAgents: [...new Set([...session.completedAgents, agentName])],
-      skippedAgents: (session.skippedAgents || []).filter(agent => agent !== agentName),
-      failedAgents: session.failedAgents.filter(agent => agent !== agentName),
-      runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName),
-      checkpoints: {
-        ...session.checkpoints,
-        [agentName]: checkpointCommit
-      }
-    };
-
-    // Check if all agents are now completed and update session status
-    const totalAgents = Object.keys(AGENTS).length;
-    const completedCount = new Set([
-      ...updates.completedAgents,
-      ...(updates.skippedAgents || [])
-    ]).size;
-    if (completedCount === totalAgents) {
-      updates.status = 'completed';
-    }
-
-    return await updateSession(sessionId, updates);
-  } finally {
-    // Always release the lock, even if an error occurs
-    unlock();
+  // Get fresh session data
+  const session = await getSession(sessionId);
+  if (!session) {
+    throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
   }
+
+  const updates = {
+    completedAgents: [...new Set([...(session.completedAgents || []), agentName])],
+    skippedAgents: (session.skippedAgents || []).filter(agent => agent !== agentName),
+    failedAgents: (session.failedAgents || []).filter(agent => agent !== agentName),
+    runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName),
+    checkpoints: {
+      ...session.checkpoints,
+      [agentName]: checkpointCommit
+    }
+  };
+
+  // Check if all agents are now completed and update session status
+  const totalAgents = Object.keys(AGENTS).length;
+  const completedCount = new Set([
+    ...updates.completedAgents,
+    ...(updates.skippedAgents || [])
+  ]).size;
+  if (completedCount === totalAgents) {
+    updates.status = 'completed';
+  }
+
+  return await updateSession(sessionId, updates);
 };
 
 // Mark agent as failed
@@ -939,26 +992,21 @@ export const markAgentCompleted = async (sessionId, agentName, checkpointCommit)
  * - Writes session store.
  */
 export const markAgentFailed = async (sessionId, agentName) => {
-  const unlock = await sessionMutex.lock(sessionId);
-  try {
-    const session = await getSession(sessionId);
-    if (!session) {
-      throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
-    }
+  validateAgent(agentName);
 
-    validateAgent(agentName);
-
-    const updates = {
-      failedAgents: [...new Set([...session.failedAgents, agentName])],
-      skippedAgents: (session.skippedAgents || []).filter(agent => agent !== agentName),
-      completedAgents: session.completedAgents.filter(agent => agent !== agentName),
-      runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName)
-    };
-
-    return await updateSession(sessionId, updates);
-  } finally {
-    unlock();
+  const session = await getSession(sessionId);
+  if (!session) {
+    throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
   }
+
+  const updates = {
+    failedAgents: [...new Set([...(session.failedAgents || []), agentName])],
+    skippedAgents: (session.skippedAgents || []).filter(agent => agent !== agentName),
+    completedAgents: (session.completedAgents || []).filter(agent => agent !== agentName),
+    runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName)
+  };
+
+  return await updateSession(sessionId, updates);
 };
 
 // Mark agent as skipped
@@ -982,35 +1030,30 @@ export const markAgentFailed = async (sessionId, agentName) => {
  * - Writes session store.
  */
 export const markAgentSkipped = async (sessionId, agentName) => {
-  const unlock = await sessionMutex.lock(sessionId);
-  try {
-    const session = await getSession(sessionId);
-    if (!session) {
-      throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
-    }
+  validateAgent(agentName);
 
-    validateAgent(agentName);
-
-    const updates = {
-      skippedAgents: [...new Set([...(session.skippedAgents || []), agentName])],
-      failedAgents: (session.failedAgents || []).filter(agent => agent !== agentName),
-      completedAgents: (session.completedAgents || []).filter(agent => agent !== agentName),
-      runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName)
-    };
-
-    const totalAgents = Object.keys(AGENTS).length;
-    const completedCount = new Set([
-      ...updates.completedAgents,
-      ...updates.skippedAgents
-    ]).size;
-    if (completedCount === totalAgents) {
-      updates.status = 'completed';
-    }
-
-    return await updateSession(sessionId, updates);
-  } finally {
-    unlock();
+  const session = await getSession(sessionId);
+  if (!session) {
+    throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
   }
+
+  const updates = {
+    skippedAgents: [...new Set([...(session.skippedAgents || []), agentName])],
+    failedAgents: (session.failedAgents || []).filter(agent => agent !== agentName),
+    completedAgents: (session.completedAgents || []).filter(agent => agent !== agentName),
+    runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName)
+  };
+
+  const totalAgents = Object.keys(AGENTS).length;
+  const completedCount = new Set([
+    ...updates.completedAgents,
+    ...updates.skippedAgents
+  ]).size;
+  if (completedCount === totalAgents) {
+    updates.status = 'completed';
+  }
+
+  return await updateSession(sessionId, updates);
 };
 
 // Mark agent as running
@@ -1021,25 +1064,20 @@ export const markAgentSkipped = async (sessionId, agentName) => {
  * - checkpoint-manager when an agent starts execution.
  */
 export const markAgentRunning = async (sessionId, agentName) => {
-  const unlock = await sessionMutex.lock(sessionId);
-  try {
-    const session = await getSession(sessionId);
-    if (!session) {
-      throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
-    }
+  validateAgent(agentName);
 
-    validateAgent(agentName);
-
-    const updates = {
-      runningAgents: [...new Set([...(session.runningAgents || []), agentName])],
-      // If it was marked as failed before, clear it when we start running again
-      failedAgents: (session.failedAgents || []).filter(a => a !== agentName)
-    };
-
-    return await updateSession(sessionId, updates);
-  } finally {
-    unlock();
+  const session = await getSession(sessionId);
+  if (!session) {
+    throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
   }
+
+  const updates = {
+    runningAgents: [...new Set([...(session.runningAgents || []), agentName])],
+    // If it was marked as failed before, clear it when we start running again
+    failedAgents: (session.failedAgents || []).filter(a => a !== agentName)
+  };
+
+  return await updateSession(sessionId, updates);
 };
 
 // Get time ago helper
@@ -1101,10 +1139,12 @@ export const getSessionStatus = (session) => {
   const failedCount = session.failedAgents.length;
 
   let status;
-  if (completedCount === totalAgents) {
-    status = 'completed';
+  if ((session.runningAgents || []).length > 0) {
+    status = 'running';
   } else if (failedCount > 0) {
     status = 'failed';
+  } else if (completedCount === totalAgents) {
+    status = 'completed';
   } else {
     status = 'in-progress';
   }
@@ -1276,8 +1316,10 @@ export const rollbackToAgent = async (sessionId, targetAgent) => {
  * [부작용]
  * - Updates session store by promoting/demoting agents.
  */
-export const reconcileSession = async (sessionId) => {
+export const reconcileSession = async (sessionId, options = {}) => {
+  const { includeStaleRunning = true } = options;
   const { AuditSession } = await import('./audit/index.js');
+  const STALE_AGENT_THRESHOLD_MS = 1000 * 60 * 30; // 30 minutes
 
   // Get DokodemoDoor store session
   const dokodemodoorSession = await getSession(sessionId);
@@ -1345,6 +1387,25 @@ export const reconcileSession = async (sessionId) => {
   for (const agentName of failedToAdd) {
     await markAgentFailed(sessionId, agentName);
     report.failures.push(agentName);
+  }
+
+  if (includeStaleRunning) {
+    // PART 4: STALE RUNNING AGENTS
+    // If an agent is still marked running but has no recent activity, mark it failed.
+    const runningAgents = dokodemodoorSession.runningAgents || [];
+    const now = Date.now();
+    for (const agentName of runningAgents) {
+      if (dokodemodoorSession.failedAgents.includes(agentName)) continue;
+      const agentData = auditData.metrics.agents?.[agentName];
+      const lastAttempt = agentData?.attempts?.[agentData.attempts.length - 1];
+      const lastTimestamp = lastAttempt?.timestamp ? new Date(lastAttempt.timestamp).getTime() : null;
+      const isStale = !lastTimestamp || (now - lastTimestamp) > STALE_AGENT_THRESHOLD_MS;
+
+      if (isStale) {
+        await markAgentFailed(sessionId, agentName);
+        report.failures.push(agentName);
+      }
+    }
   }
 
   return report;

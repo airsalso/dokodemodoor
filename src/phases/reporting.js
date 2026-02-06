@@ -48,6 +48,8 @@ export async function assembleFinalReport(sourceDir) {
       files: [
         { name: 'Pre-Reconnaissance', path: 'pre_recon_deliverable.md' },
         { name: 'Reconnaissance', path: 'recon_deliverable.md' },
+        { name: 'Recon Verification', path: 'recon_verify_deliverable.md' },
+        { name: 'API Fuzzing Findings', path: 'api_fuzzer_deliverable.md' },
         { name: 'Full Code Analysis', path: 'code_analysis_deliverable.md' }
       ]
     },
@@ -183,6 +185,8 @@ export async function prepareReportInputs(sourceDir) {
     { path: 'authz_analysis_deliverable.md', maxChars: 16000 },
     { path: 'pre_recon_deliverable.md', maxChars: 12000 },
     { path: 'recon_deliverable.md', maxChars: 12000 },
+    { path: 'recon_verify_deliverable.md', maxChars: 12000 },
+    { path: 'api_fuzzer_deliverable.md', maxChars: 12000 },
     { path: 'auth_exploitation_evidence.json', maxChars: 12000 },
     { path: 'authz_exploitation_evidence.json', maxChars: 12000 },
     { path: 'sqli_exploitation_evidence.json', maxChars: 12000 },

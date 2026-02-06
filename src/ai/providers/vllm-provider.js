@@ -126,8 +126,11 @@ export class VLLMProvider extends LLMProvider {
     const isQueue = requestedType && requestedType.includes('QUEUE');
 
     // Fuzzy matching for various agent name formats
-    let forced = 'CODE_ANALYSIS';
-    if (name.includes('authz')) forced = isQueue ? 'AUTHZ_QUEUE' : 'AUTHZ_ANALYSIS';
+    let forced = requestedType || (name.includes('recon') ? 'RECON' : 'CODE_ANALYSIS');
+    if (name.includes('recon-verify')) forced = 'RECON_VERIFY';
+    else if (name.includes('fuzzer') || name.includes('api')) forced = 'API_FUZZ_REPORT';
+    else if (name.includes('osv')) forced = isQueue ? 'OSV_QUEUE' : 'OSV_REPORT';
+    else if (name.includes('authz')) forced = isQueue ? 'AUTHZ_QUEUE' : 'AUTHZ_ANALYSIS';
     else if (name.includes('auth')) forced = isQueue ? 'AUTH_QUEUE' : 'AUTH_ANALYSIS';
     else if (name.includes('xss')) forced = isQueue ? 'XSS_QUEUE' : 'XSS_ANALYSIS';
     else if (name.includes('ssrf')) forced = isQueue ? 'SSRF_QUEUE' : 'SSRF_ANALYSIS';
@@ -253,6 +256,15 @@ export class VLLMProvider extends LLMProvider {
     }
     if (name.includes('pre-recon')) {
       return "[ ] Architecture Scanner (stack, deploy model, services, configs)\n[ ] Entry Point Mapper (routes, controllers, uploads, webhooks)\n[ ] Security Pattern Hunter (auth flows, tokens, RBAC/ABAC)\n[ ] Injection & Sink Hunter (SQL, template, command, path, XSS)\n[ ] SSRF / Outbound Request Tracer\n[ ] Data Security Auditor\n[ ] Synthesis & Report Generation";
+    }
+    if (name.includes('fuzzer') || name.includes('api')) {
+      return "[ ] Identify API Endpoints & Methods\n[ ] Map Parameters & Request Schemas\n[ ] Execute Fuzzing Payloads (Anomalies, Error Handling)\n[ ] Analyze Response Patterns & Security Headers\n[ ] Document API Fuzzing Findings & Candidates\n[ ] Update Master Reconnaissance Map";
+    }
+    if (name.includes('login')) {
+      return "[ ] Verify Login Flow using instructions\n[ ] Check Authentication Success & Session Persistence";
+    }
+    if (name.includes('verify')) {
+      return "[ ] Verify Recon Map & Identified Endpoints\n[ ] SQLi Investigation\n[ ] Codei Investigation\n[ ] SSTI Investigation\n[ ] Pathi Investigation\n[ ] XSS Investigation\n[ ] Auth Investigation\n[ ] Authz/IDOR Investigation\n[ ] SSRF Investigation\n[ ] Discover & Add newly found vulnerabilities not in Recon Map";
     }
     return "[ ] Initial Analysis\n[ ] Investigation\n[ ] Documentation";
   }
@@ -818,15 +830,18 @@ export class VLLMProvider extends LLMProvider {
       if (!isSubAgent) {
         if (turnCount === maxTurns - 1) {
           let deliverableHint = 'both a technical summary and call save_deliverable twice (Analysis + Queue) before finishing.';
-          if (name.includes('recon') && !name.includes('pre-recon')) deliverableHint = 'a technical RECON report using save_deliverable.';
+          if (name.includes('recon-verify')) deliverableHint = 'a technical RECON_VERIFY report using save_deliverable.';
+          else if (name.includes('recon') && !name.includes('pre-recon')) deliverableHint = 'a technical RECON report using save_deliverable.';
           else if (name.includes('pre-recon')) deliverableHint = 'a technical CODE_ANALYSIS report using save_deliverable.';
+          else if (name.includes('fuzzer') || name.includes('api')) deliverableHint = 'a technical API_FUZZ_REPORT using save_deliverable.';
+          else if (name.includes('osv-analysis')) deliverableHint = 'both a technical OSV_REPORT and a JSON OSV_QUEUE using save_deliverable twice.';
 
           // Critical: Force deliverable on last turn
           messages.push({ role: 'system', content: `[FINAL TURN] CRITICAL: You MUST call save_deliverable for ${deliverableHint} NOW. Do not start any new searches or code audits. Use existing information.` });
         } else if (turnCount === Math.floor(maxTurns * 0.95)) {
-          messages.push({ role: 'system', content: `[EMERGENCY FINALIZATION] Turn ${turnCount}/${maxTurns}. You are almost out of turns. STOP all discovery immediately. Compile your findings and save your deliverables (Analysis + Queue) in the next 2-3 turns.` });
+          messages.push({ role: 'system', content: `[EMERGENCY FINALIZATION] Turn ${turnCount}/${maxTurns}. You are almost out of turns. STOP all discovery immediately. Compile your findings and save your deliverables in the next 2-3 turns.` });
         } else if (turnCount === Math.floor(maxTurns * 0.9)) {
-          messages.push({ role: 'system', content: `[WARNING] ${turnCount}/${maxTurns} turns used. You have enough info. Close all open investigations and prepare your deliverables (Analysis + Queue) now.` });
+          messages.push({ role: 'system', content: `[WARNING] ${turnCount}/${maxTurns} turns used. You have enough info. Close all open investigations and prepare your deliverables now.` });
         } else if (turnCount === Math.floor(maxTurns * 0.5)) {
           messages.push({ role: 'system', content: `[PROGRESS NUDGE] 50% turns used. If you have found ANY vulnerabilities, call 'save_deliverable' now as a draft. You can update it later.` });
         }
@@ -944,18 +959,30 @@ export class VLLMProvider extends LLMProvider {
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const readyMessages = await buildReadyMessages(extraSystemMsg);
-          response = await this.client.chat.completions.create({
-            model: this.model,
-            messages: readyMessages,
-            tools: registry.getOpenAITools(),
-            tool_choice: toolChoice,
-            temperature: this.temperature,
-            max_tokens: 16384, // Crucial for large reports (16KB+)
-            frequency_penalty: 0.2, // Prevents repetitive loops (stuttering)
-            presence_penalty: 0.1,  // Encourages variety in long reports
-            top_p: 0.9,
-            stop: ['<|im_end|>', '<|end|>', 'user\n', 'assistant\n']
-          });
+            response = await this.client.chat.completions.create({
+              model: this.model,
+              messages: readyMessages,
+              tools: registry.getOpenAITools(),
+              tool_choice: toolChoice,
+              temperature: this.temperature,
+              max_tokens: 32768, // Crucial for large reports (32KB+)
+              // Remove penalties: they cause "stuttering" (......) when models try to output
+              // repetitive technical content or markdown separators.
+              //frequency_penalty: 0,
+              //presence_penalty: 0,
+              top_p: 0.9,
+              // Tighten stop sequences: only use unambiguous end-of-turn markers.
+              // We avoid '\nuser\n' because it can occur naturally in markdown reports.
+              stop: [
+                '<|im_end|>',
+                '<|end|>',
+                '<|start|>',
+                '<|start|>assistant',
+                '<|start|>system',
+                '<|start|>user'
+              ],
+              skip_special_tokens: true
+            });
           break;
         } catch (error) {
           const msg = (error && error.message) ? error.message : '';
@@ -1028,14 +1055,26 @@ export class VLLMProvider extends LLMProvider {
                    if (agentLow.includes('sqli')) parsed.deliverable_type = 'SQLI_QUEUE';
                    else if (agentLow.includes('xss')) parsed.deliverable_type = 'XSS_QUEUE';
                    else if (agentLow.includes('ssti')) parsed.deliverable_type = 'SSTI_QUEUE';
+                   else if (agentLow.includes('osv')) parsed.deliverable_type = 'OSV_QUEUE';
                    else parsed.deliverable_type = 'INJECTION_QUEUE';
                 }
 
                 if (parsed.path && !parsed.deliverable_type) {
                    const filename = path.basename(parsed.path);
                    if (filename.includes('recon')) parsed.deliverable_type = 'RECON';
-                   else if (filename.includes('analysis')) parsed.deliverable_type = (agentName || '').includes('xss') ? 'XSS_ANALYSIS' : 'CODE_ANALYSIS';
-                   else if (filename.includes('queue')) parsed.deliverable_type = 'INJECTION_QUEUE';
+                   else if (filename.includes('analysis')) {
+                     const agentLow = (agentName || '').toLowerCase();
+                     if (agentLow.includes('xss')) parsed.deliverable_type = 'XSS_ANALYSIS';
+                     else if (agentLow.includes('osv')) parsed.deliverable_type = 'OSV_REPORT';
+                     else if (agentLow.includes('sqli')) parsed.deliverable_type = 'SQL_ANALYSIS';
+                     else if (agentLow.includes('fuzzer') || agentLow.includes('api')) parsed.deliverable_type = 'API_FUZZ_REPORT';
+                     else parsed.deliverable_type = 'CODE_ANALYSIS';
+                   }
+                   else if (filename.includes('queue')) {
+                     const agentLow = (agentName || '').toLowerCase();
+                     if (agentLow.includes('osv')) parsed.deliverable_type = 'OSV_QUEUE';
+                     else parsed.deliverable_type = 'INJECTION_QUEUE';
+                   }
                 }
                 if (parsed.deliverable_type) {
                   delete parsed.__toolName;
@@ -1219,9 +1258,17 @@ export class VLLMProvider extends LLMProvider {
                 missing = 'EVIDENCE (JSON exploitation report)';
              } else if (name.includes('pre-recon') && !currentSaved.includes('CODE_ANALYSIS')) {
                 missing = 'CODE_ANALYSIS';
-             } else if (name.includes('recon') && !name.includes('pre-recon') && !currentSaved.includes('RECON')) {
+             } else if (name.includes('recon-verify') && !currentSaved.includes('RECON_VERIFY')) {
+                missing = 'RECON_VERIFY';
+             } else if (name.includes('recon') && !name.includes('pre-recon') && !name.includes('recon-verify') && !currentSaved.includes('RECON')) {
                 missing = 'RECON';
-             }
+              } else if (name.includes('osv-analysis')) {
+                const hasReport = currentSaved.includes('OSV_REPORT');
+                const hasQueue = currentSaved.includes('OSV_QUEUE');
+                if (!hasReport || !hasQueue) {
+                  missing = !hasReport ? 'OSV_REPORT (Markdown)' : 'OSV_QUEUE (JSON)';
+                }
+              }
 
              if (missing) {
                const isNearEnd = turnCount >= maxTurns - 1;

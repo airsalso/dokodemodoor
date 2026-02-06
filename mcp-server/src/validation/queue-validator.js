@@ -97,17 +97,17 @@ export function validateQueueJson(content) {
         };
       }
 
-      if (!entry.severity || typeof entry.severity !== 'string') {
-        return {
-          valid: false,
-          message: `Invalid queue structure: vulnerabilities[${i}].severity is required (Critical | High | Medium | Low).`,
-        };
+      if (entry.severity && typeof entry.severity === 'string') {
+        const normalized = entry.severity.charAt(0).toUpperCase() + entry.severity.slice(1).toLowerCase();
+        if (allowedSeverities.has(normalized)) {
+          entry.severity = normalized; // Normalize in-place
+        }
       }
 
-      if (!allowedSeverities.has(entry.severity)) {
+      if (!entry.severity || !allowedSeverities.has(entry.severity)) {
         return {
           valid: false,
-          message: `Invalid queue structure: vulnerabilities[${i}].severity must be one of Critical, High, Medium, Low.`,
+          message: `Invalid queue structure: vulnerabilities[${i}].severity must be one of Critical, High, Medium, Low (received: ${entry.severity}).`,
         };
       }
     }

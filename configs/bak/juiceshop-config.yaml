@@ -1,0 +1,47 @@
+authentication:
+  login_type: form
+  login_url: "http://172.20.208.1:3002/#/login"
+
+  # Current active account (Admin)
+  credentials:
+    username: "admin@juice-sh.op"
+    password: "admin123"
+
+  # Improved login flow for OWASP Juice Shop SPA
+  login_flow:
+    - "1. Navigate to http://172.20.208.1:3002/#/login"
+    - "2. Dismiss Welcome Modal: Click 'Close Welcome Banner' (button with aria-label='Close Welcome Banner' or ref e97). This is CRITICAL as it blocks the screen."
+    - "3. Dismiss Cookie Banner: Click 'Me want it!' (button with aria-label='dismiss cookie message' or ref e5)."
+    - "4. Enter Email: Click input#email (ref e50) first to focus, then type 'admin@juice-sh.op'."
+    - "5. Enter Password: Click input#password (ref e58) first to focus, then type 'admin123'."
+    - "6. Enable Login Button: Press 'Tab' (browser_press_key) to trigger Angular validation. Ensure button#loginButton (ref e68?) is no longer disabled."
+    - "7. Click Login: Click button#loginButton."
+    - "8. Confirm: Wait for URL to include '/#/search'."
+
+  # Success condition
+  success_condition:
+    type: url_contains
+    value: "/#/search"
+
+rules:
+  focus:
+    - description: "User and permission related APIs"
+      type: path
+      url_path: "/api/Users/*"
+
+    - description: "Payment and card management (IDOR/Logic suspects)"
+      type: path
+      url_path: "/api/Cards/*"
+
+    - description: "Product search and DB queries (Injection suspects)"
+      type: path
+      url_path: "/rest/products/search*"
+
+  avoid:
+    - description: "Static assets and library files"
+      type: path
+      url_path: "/assets/*"
+
+    - description: "Logout functionality (to keep session)"
+      type: path
+      url_path: "/#/logout"

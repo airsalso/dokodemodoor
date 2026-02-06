@@ -99,7 +99,10 @@ export async function handleDeveloperCommand(command, args, runAgentPromptWithRe
     // Self-healing: Reconcile session with audit logs before executing command
     // This ensures DokodemoDoor store is consistent with audit data, even after crash recovery
     try {
-      const reconcileReport = await reconcileSession(session.id);
+      const reconcileOptions = command === '--status'
+        ? { includeStaleRunning: false }
+        : undefined;
+      const reconcileReport = await reconcileSession(session.id, reconcileOptions);
 
       if (reconcileReport.promotions.length > 0) {
         console.log(chalk.blue(`🔄 Reconciled: Added ${reconcileReport.promotions.length} completed agents from audit logs`));

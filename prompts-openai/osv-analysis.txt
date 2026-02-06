@@ -30,13 +30,45 @@ Analyze the provided vulnerability data and the project's source code to:
 1. **CODE STAYS LOCAL**: Do not send any part of the project's source code to external search engines.
 2. **METADATA ONLY SEARCH**: Use `search_web` ONLY to look up CVE IDs or public vulnerability names (e.g., "CVE-2021-44228 exploit details").
 3. **SOURCE IS TRUTH**: Use the `bash` tool locally to verify if vulnerable functions/classes are imported or called.
-4. **NO HALLUCINATION**: If a vulnerability is found in a package but the package is not actually imported/used (e.g., a build tool vs runtime lib), label it as "Low Direct Risk".
+4. **BLACK DUCK INTEGRATION**: If tools starting with `blackduck__` are available, use them as the **authoritative source** for vulnerability data and component identification. Use them to get deeper insights than the basic OSV.dev report.
+5. **NO HALLUCINATION**: If a vulnerability is found in a package but the package is not actually imported/used (e.g., a build tool vs runtime lib), label it as "Low Direct Risk".
 
 ---
 
 ## 5) DELIVERABLE STRUCTURE (MANDATORY)
 
-Save your analysis as a deliverable of type **OSV_REPORT**.
+You MUST save TWO deliverables. **CRITICAL: The list of vulnerabilities in both deliverables MUST be identical (1:1 mapping).**
+
+### 1. OSV_REPORT (Markdown)
+Detailed technical analysis as described below.
+
+### 2. OSV_QUEUE (JSON)
+A structured list of reachable vulnerabilities for further exploitation.
+**RULES:**
+1.  **Strict 1:1 Mapping**: Every vulnerability described in the Markdown report MUST have a corresponding entry here.
+2.  **Severity Casing**: Severity MUST be exactly one of: `Critical`, `High`, `Medium`, `Low` (Title Case).
+3.  **No Hallucination**: Only include vulnerabilities confirmed to be present in the project's dependencies.
+
+FORMAT:
+```json
+{
+  "vulnerabilities": [
+    {
+      "id": "Vulnerability ID (e.g. CVE-2021-44228)",
+      "package": "Package name",
+      "severity": "Critical|High|Medium|Low",
+      "description": "Brief description",
+      "reproduce_steps": "Steps to trigger the vulnerable code path",
+      "metadata": {
+        "reachability": "Verified/Potential",
+        "affected_version": "v1.2.3"
+      }
+    }
+  ]
+}
+```
+
+---
 
 # Open Source Vulnerability Analysis Report
 
@@ -56,8 +88,12 @@ For each significant vulnerability:
     - *Scenario 2 (Optional)*: Edge case exploit.
 
 ## 3. Remediation & Hedging Guide
-- **Recommended Update**: Target version and command (e.g., `npm install package@v2.0.1`).
-- **Hedging Strategies**: Context-specific workarounds (e.g., "Filter input at the router level", "Disable feature X").
+
+| Package | Current Version | Vulnerable Version(s) | Recommended Update | Hedge / Workaround |
+|:---|:---|:---|:---|:---|
+| [Name] | [vX.Y.Z] | [<vA.B.C] | `npm install package@vA.B.C` | Brief technical workaround |
+
+- **Security Strategy**: Summary of overall hedging approach.
 
 ---
 

@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { getProvider } from '../../../src/ai/llm-provider.js';
 import { toolRegistry } from '../../../src/ai/tools/tool-registry.js';
 import { config } from '../../../src/config/env.js';
-import { getAgentName, getTargetDir } from '../../../src/utils/context.js';
+import { getAgentName, getTargetDir, getWebUrl } from '../../../src/utils/context.js';
 import chalk from 'chalk';
 
 export const TaskAgentInputSchema = z.object({
@@ -46,11 +46,50 @@ export const BashToolSchema = z.object({
  * - Promise<object>
  */
 export async function executeBash(params) {
-  const { command } = params;
+  let { command } = params;
   const targetDir = getTargetDir();
+  const agentName = (getAgentName() || '').toLowerCase();
+  const webUrl = getWebUrl();
   let safeCommand = command;
 
   try {
+    // Normalize miswrapped JSON command payloads
+    const trimmed = (safeCommand || '').trim();
+    if (trimmed.startsWith('{') && trimmed.includes('"command"')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed.command === 'string') {
+          safeCommand = parsed.command;
+        }
+      } catch (e) {
+        // Fall through and let execution fail with a clear error below
+      }
+    }
+
+    if (!safeCommand || typeof safeCommand !== 'string') {
+      throw new Error('Missing bash command');
+    }
+
+    // Enforce target URL usage for api-fuzzer to avoid localhost drift
+    if (agentName.includes('api-fuzzer') && webUrl) {
+      const host = (() => {
+        try {
+          return new URL(webUrl).hostname;
+        } catch {
+          return null;
+        }
+      })();
+      const usesLocalhost = /https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(safeCommand);
+      const isTargetLocal = host === 'localhost' || host === '127.0.0.1';
+      if (usesLocalhost && !isTargetLocal) {
+        return {
+          status: 'error',
+          output: `Blocked: api-fuzzer must use target webUrl (${webUrl}) instead of localhost.`,
+          exitCode: 2
+        };
+      }
+    }
+
     // Add timeout to prevent hanging on large searches
     const timeoutSeconds = 60;
 
@@ -195,7 +234,7 @@ function registerSubAgentTools() {
   );
 
   // Common aliases that LLMs might use based on their training
-  const bashAliases = ['grep', 'search_file', 'open_file', 'read_file', 'ls', 'find', 'list_files'];
+  const bashAliases = ['grep', 'search_file', 'open_file', 'read_file', 'ls', 'find', 'list_files', 'rg'];
   for (const alias of bashAliases) {
     subAgentRegistry.register(
       alias,
@@ -229,15 +268,43 @@ function registerSubAgentTools() {
         };
 
         // Path normalization: Safe guarding against LLM omitting leading slash on absolute paths.
-        if (p.path && !p.path.startsWith('/')) {
+        if (p.path) {
           const targetDir = getTargetDir();
-          const correctedPath = '/' + p.path;
-
-          // Only normalize if the path DOES NOT exist relatively BUT would exist/match if absolute
           const fs = await import('node:fs');
-          if (!fs.existsSync(p.path) && correctedPath.includes(targetDir)) {
-            p.path = correctedPath;
-            console.log(chalk.gray(`      🔧 Context-aware path normalization: ${p.path}`));
+          const pathMod = await import('node:path');
+
+          // Resolve relative paths against repo root
+          if (!pathMod.isAbsolute(p.path)) {
+            const absCandidate = pathMod.resolve(targetDir, p.path);
+            if (fs.existsSync(absCandidate)) {
+              p.path = absCandidate;
+              console.log(chalk.gray(`      🔧 Auto-resolved path: ${p.path}`));
+            }
+          }
+
+          // If still missing, attempt basename recovery via rg --files
+          if (!fs.existsSync(p.path)) {
+            try {
+              const { execSync } = await import('child_process');
+              const base = pathMod.basename(p.path);
+              const cmd = `rg --files -g '*${base}*' ${shQuote(targetDir)} | head -n 1`;
+              const match = execSync(cmd, { encoding: 'utf8' }).trim();
+              if (match) {
+                p.path = match;
+                console.log(chalk.gray(`      🔧 Auto-recovered path: ${p.path}`));
+              }
+            } catch (e) {
+              // Best-effort fallback; keep original path if anything fails.
+            }
+          }
+
+          // Legacy normalization for absolute-like paths missing leading slash
+          if (!p.path.startsWith('/')) {
+            const correctedPath = '/' + p.path;
+            if (!fs.existsSync(p.path) && correctedPath.includes(targetDir)) {
+              p.path = correctedPath;
+              console.log(chalk.gray(`      🔧 Context-aware path normalization: ${p.path}`));
+            }
           }
         }
 

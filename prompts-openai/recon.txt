@@ -90,9 +90,6 @@ Repository Path: {{REPO_PATH}}
 ### 4.4 Authentication Instructions (if provided)
 {{LOGIN_INSTRUCTIONS}}
 
-### 4.5 Detailed Application Profile (Context)
-{{APP_PROFILE}}
-
 ---
 
 ## 5) STATE MANAGEMENT & PERSISTENCE (CORE MEMORY)
@@ -238,6 +235,7 @@ High-level description of:
 ---
 
 ## 3. Authentication & Session Management Flow
+### [ANCHOR:AUTH_FLOW]
 Step-by-step auth flow with code pointers.
 
 ### 3.1 Role Assignment Process
@@ -290,6 +288,7 @@ Provide file:line references.
 ---
 
 ## 8. Authorization Vulnerability Candidates (PRIORITIZED)
+### [ANCHOR:AUTHZ_CANDIDATES]
 
 ### 8.1 Horizontal (IDOR-style)
 Must specifically reference items in Section 6.
@@ -302,6 +301,9 @@ This section defines **where exploitation should begin**.
 ---
 
 ## 9. Injection Source Inventory (RECON ONLY)
+### [ANCHOR:INJECTION_SOURCES]
+Add the anchor line exactly as shown:
+`## [ANCHOR:INJECTION_SOURCES]`
 
 Document **sources → sinks paths**, not payloads.
 

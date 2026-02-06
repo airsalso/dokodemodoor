@@ -6,8 +6,13 @@
 - **IGNORE-ARTIFACTS**: Never search or read files in `audit-logs/`, `deliverables/`, `reports/`, `node_modules/`, or any `*.log`, `*.bak`, `*.tmp`, `*.json` (if in root) files. These are external to the attack surface.
 - **NO-REDUNDANCY**: If you have already analyzed a file and found no vulnerability, do not open it again.
 - **FOCUS-ON-EXPLOITABLE**: Prioritize sinks that are reachable from the network (as identified in recon). Skip background tasks or internal-only utilities.
-- **BASH-PRECISION**: When using `bash` or `run_command` tools, the `command` argument must be a **plain string**. Do NOT wrap the command in JSON (e.g., `{"command": "..."}`) inside the tool call. Example correct usage: `{"command": "curl http://..."}`.
+- **BASH-PRECISION (CRITICAL)**: When using `bash` or `run_command` tools, the command string (e.g., `command` or `CommandLine` argument) MUST be a **plain shell string**.
+  - ❌ **FATAL ERROR**: Do NOT wrap the command in JSON (e.g., `{"command": "..."}`).
+  - ❌ **FATAL ERROR**: Do NOT include a `"timeout"` field inside the command string.
+  - ✅ **Correct**: `{"command": "schemathesis run ..."}`
+  - ❌ **Incorrect (Shell will fail)**: `{"command": "{\"command\": \"schemathesis run ...\", \"timeout\": 60000}"}`
+  - If your command starts with `{`, it will fail. Ensure it starts with the tool name (e.g., `schemathesis`, `curl`, `ls`).
+  - **TIP**: To run multiple commands, use shell operators like `;` or `&&` within the **same** string (e.g., `{"command": "cd subdir && ls"}`).
 - **TIME-DISCIPLINE**: If turn count is > 80% (e.g., 40/50 or 80/100), STOP all new discovery. Immediately compile findings and call `save_deliverable` (Analysis + Queue).
 - **AMBIGUITY-HANDLING**: If a file search or open fails twice, assume the path is dynamic or removed. Mark as "Untestable" in findings and move to the next task.
 - **SINK-BATCHING**: When multiple endpoints use the same controller/logic, analyze the controller ONCE and apply findings to all related endpoints.
-

@@ -122,6 +122,49 @@ const parseLoginCheckStatus = (output) => {
   return matches[matches.length - 1];
 };
 
+const globToRegex = (pattern) => {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(escaped.replace(/\*/g, '.*'), 'i');
+};
+
+const lineMatchesAvoidRule = (line, rule) => {
+  if (!rule?.url_path) return false;
+  const value = rule.url_path;
+  const lowerLine = line.toLowerCase();
+  const lowerValue = value.toLowerCase();
+
+  switch (rule.type) {
+    case 'path': {
+      if (value.includes('*')) {
+        return globToRegex(value).test(line);
+      }
+      return lowerLine.includes(lowerValue);
+    }
+    case 'subdomain':
+    case 'domain':
+      return lowerLine.includes(lowerValue);
+    default:
+      return false;
+  }
+};
+
+const filterReconContentByAvoid = (content, avoidRules) => {
+  if (!content || !avoidRules || avoidRules.length === 0) {
+    return { content, removed: 0 };
+  }
+
+  const lines = content.split('\n');
+  let removed = 0;
+  const filtered = lines.filter(line => {
+    if (!line.trim()) return true;
+    const shouldRemove = avoidRules.some(rule => lineMatchesAvoidRule(line, rule));
+    if (shouldRemove) removed += 1;
+    return !shouldRemove;
+  });
+
+  return { content: filtered.join('\n'), removed };
+};
+
 /**
  * [목적] 인증 플로우가 있을 때 login-check 에이전트를 실행.
  *
@@ -509,25 +552,85 @@ const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadP
         'ssrf-exploit': chalk.magenta,
         'authz-vuln': chalk.green,
         'authz-exploit': chalk.green,
-        'recon-verify': chalk.blueBright
+        'recon-verify': chalk.blueBright,
+        'api-fuzzer': chalk.cyanBright
       };
+
       return colorMap[agentName] || chalk.cyan;
     };
 
     // Targeted Context Injection: Prevent specialists from repeating discovery
     let targetedContext = '';
-    if (agentName.includes('-vuln') || agentName.includes('-exploit')) {
-      const reconPath = path.join(targetRepo, 'deliverables', 'recon_deliverable.md');
+    if (agentName.includes('-vuln') || agentName.includes('-exploit') || agentName === 'api-fuzzer') {
+      const deliverablesDir = path.join(targetRepo, 'deliverables');
+      const reconPath = path.join(deliverablesDir, 'recon_deliverable.md');
+      const reconVerifyPath = path.join(deliverablesDir, 'recon_verify_deliverable.md');
+      const apiFuzzPath = path.join(deliverablesDir, 'api_fuzzer_deliverable.md');
+
+      let findings = '';
+
+      // 1. Load Recon Map (for all agents)
       if (await fs.pathExists(reconPath)) {
         try {
           const reconContent = await fs.readFile(reconPath, 'utf8');
-          targetedContext = `\n\n# TARGETED RECONNAISSANCE FINDINGS (MANDATORY STARTING POINT)\nUse the findings below to skip initial discovery. Do not run 'ls' on paths already identified. Proceed directly to analysis or exploitation of the following:\n\n${reconContent}`;
-          console.log(chalk.blue(`   🎯 Injected targeted recon findings into ${agentName} context`));
+          const { content: filteredRecon, removed } = filterReconContentByAvoid(
+            reconContent,
+            distributedConfig?.avoid
+          );
+          if (removed > 0) {
+            console.log(chalk.gray(`   🧹 Filtered ${removed} recon lines due to avoid rules`));
+          }
+          findings += `## APPLICATION MAP (From Reconnaissance)\n${filteredRecon}\n\n`;
         } catch (e) {
-          console.log(chalk.yellow(`   ⚠️  Failed to read recon deliverable for context injection: ${e.message}`));
+          console.log(chalk.yellow(`   ⚠️  Failed to read recon deliverable: ${e.message}`));
         }
       }
+
+      // 1.1 Load Recon Verification Overlay (if available)
+      if (await fs.pathExists(reconVerifyPath)) {
+        try {
+          const reconVerifyContent = await fs.readFile(reconVerifyPath, 'utf8');
+          findings += `## RECON VERIFICATION OVERLAY (Verified Evidence)\n${reconVerifyContent}\n\n`;
+        } catch (e) {
+          console.log(chalk.yellow(`   ⚠️  Failed to read recon verify deliverable: ${e.message}`));
+        }
+      }
+
+      // 2. Load API Fuzzing Findings (Hotspots) - only for vuln/exploit agents, not for api-fuzzer itself
+      if (agentName !== 'api-fuzzer' && await fs.pathExists(apiFuzzPath)) {
+        try {
+          const apiFuzzContent = await fs.readFile(apiFuzzPath, 'utf8');
+          findings += `## API FUZZING HOTSPOTS (From Schemathesis)\n${apiFuzzContent}\n\n`;
+        } catch (e) {
+          console.log(chalk.yellow(`   ⚠️  Failed to read API fuzz deliverable: ${e.message}`));
+        }
+      }
+
+      // 3. Load Active Auth Session
+      const authSessionPath = path.join(deliverablesDir, 'auth_session.json');
+      if (await fs.pathExists(authSessionPath)) {
+        try {
+          const authSessionContent = await fs.readFile(authSessionPath, 'utf8');
+          findings += `## ACTIVE AUTHENTICATION SESSION\nUse the following session data for all authenticated requests (curl, schemathesis, playwright):\n\`\`\`json\n${authSessionContent}\n\`\`\`\n\n`;
+          console.log(chalk.blue(`   🔐 Injected active auth session into ${agentName} context`));
+        } catch (e) {
+          console.log(chalk.yellow(`   ⚠️  Failed to read auth session deliverable: ${e.message}`));
+        }
+      }
+
+      if (findings) {
+      const contextLabel = agentName === 'api-fuzzer'
+        ? 'RECONNAISSANCE FINDINGS (STARTING POINT)'
+        : 'TARGETED ANALYSIS FINDINGS (MANDATORY STARTING POINT)';
+      const contextInstruction = agentName === 'api-fuzzer'
+        ? 'Use the reconnaissance data below to identify API endpoints and authentication mechanisms for fuzzing. Save detailed results to API_FUZZ_REPORT (working memory). Do NOT edit recon_deliverable.md:'
+        : 'Use the findings below to skip initial discovery. Proceed directly to analysis or exploitation of the following areas:';
+
+        targetedContext = `\n\n# ${contextLabel}\n${contextInstruction}\n\n${findings}`;
+        console.log(chalk.blue(`   🎯 Injected targeted findings (Recon${agentName !== 'api-fuzzer' ? ' + API Fuzz' : ''}) into ${agentName} context`));
+      }
     }
+
 
     const result = await runAgentPromptWithRetry(
       prompt,

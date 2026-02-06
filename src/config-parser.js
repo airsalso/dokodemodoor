@@ -55,8 +55,13 @@ export const parseConfig = async (configPath) => {
       throw new Error(`Configuration file not found: ${configPath}`);
     }
 
-    // File size check (prevent extremely large files)
+    // Directory check
     const stats = await fs.stat(configPath);
+    if (stats.isDirectory()) {
+      throw new Error(`Configuration path is a directory: ${configPath}. Please provide a valid YAML or JSON file path.`);
+    }
+
+    // File size check (prevent extremely large files)
     const maxFileSize = 1024 * 1024; // 1MB
     if (stats.size > maxFileSize) {
       throw new Error(`Configuration file too large: ${stats.size} bytes (maximum: ${maxFileSize} bytes)`);

@@ -81,7 +81,7 @@ export const config = {
       model: process.env.VLLM_MODEL || 'openai/gpt-oss-20b',
       apiKey: process.env.VLLM_API_KEY || 'EMPTY',
       temperature: parseFloat(process.env.VLLM_TEMPERATURE, 0.7),
-      maxTurns: parseInt(process.env.VLLM_MAX_TURNS, 50),
+      maxTurns: parseInt(process.env.VLLM_MAX_TURNS, 100),
       maxPromptChars: parseIntDecimal(process.env.VLLM_MAX_PROMPT_CHARS, 32000)
     }
   },
@@ -100,6 +100,16 @@ export const config = {
     preReconParallel: parseBoolean(process.env.DOKODEMODOOR_PRE_RECON_PARALLEL, false),
     subAgentTruncateLimit: parseIntDecimal(process.env.DOKODEMODOOR_SUB_AGENT_TRUNCATE_LIMIT, 50000),
     subAgentMaxTurns: parseIntDecimal(process.env.DOKODEMODOOR_SUB_AGENT_MAX_TURNS, 50),
+
+    // Agent-specific overrides (optional)
+    agentMaxTurns: {
+      'osv-analysis': parseIntDecimal(process.env.DOKODEMODOOR_OSV_MAX_TURNS, null),
+      'recon': parseIntDecimal(process.env.DOKODEMODOOR_RECON_MAX_TURNS, null),
+      'pre-recon': parseIntDecimal(process.env.DOKODEMODOOR_PRE_RECON_MAX_TURNS, null),
+      'api-fuzzer': parseIntDecimal(process.env.DOKODEMODOOR_API_FUZZER_MAX_TURNS, 100),
+    },
+
+
     contextCompressionThreshold: parseIntDecimal(process.env.DOKODEMODOOR_CONTEXT_COMPRESSION_THRESHOLD, 30000),
     contextCompressionWindow: parseIntDecimal(process.env.DOKODEMODOOR_CONTEXT_COMPRESSION_WINDOW, 15),
     agentDebugLog: parseBoolean(process.env.DOKODEMODOOR_AGENT_DEBUG_LOG_ENABLED, false),

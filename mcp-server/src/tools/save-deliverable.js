@@ -12,6 +12,9 @@ import { createToolResult } from '../types/tool-responses.js';
 import { validateQueueJson } from '../validation/queue-validator.js';
 import { validateEvidenceJson } from '../validation/evidence-validator.js';
 import { saveDeliverableFile } from '../utils/file-operations.js';
+import { existsSync, readFileSync, appendFileSync } from 'fs';
+import { join } from 'path';
+import { getTargetDir } from '../../../src/utils/context.js';
 import { createValidationError, createGenericError } from '../utils/error-formatter.js';
 
 /**
@@ -70,9 +73,55 @@ export async function saveDeliverable(args) {
   try {
     const { deliverable_type, content } = args;
 
+    let finalContent = content;
+    const deliverablesDir = join(getTargetDir(), 'deliverables');
+    const queueMergeLogPath = join(deliverablesDir, 'queue-merge.log');
+    const logQueueMerge = (message) => {
+      const timestamp = new Date().toISOString();
+      const line = `[${timestamp}] ${message}\n`;
+      console.log(message);
+      try {
+        appendFileSync(queueMergeLogPath, line, 'utf8');
+      } catch (logError) {
+        console.log(`[QUEUE MERGE] Failed to write queue-merge.log: ${logError.message}`);
+      }
+    };
+
     // Validate queue JSON if applicable
     if (isQueueType(deliverable_type)) {
-      const queueValidation = validateQueueJson(content);
+      // Merge with existing queue if present (append-only, no de-duplication)
+      const filename = DELIVERABLE_FILENAMES[deliverable_type];
+      const existingPath = join(deliverablesDir, filename);
+
+      if (existsSync(existingPath)) {
+        try {
+          const existingRaw = readFileSync(existingPath, 'utf8');
+          const existingJson = JSON.parse(existingRaw);
+          const incomingJson = JSON.parse(content);
+          const existingList = Array.isArray(existingJson?.vulnerabilities) ? existingJson.vulnerabilities : [];
+          const incomingList = Array.isArray(incomingJson?.vulnerabilities) ? incomingJson.vulnerabilities : [];
+          finalContent = JSON.stringify(
+            { vulnerabilities: [...existingList, ...incomingList] },
+            null,
+            2
+          );
+          logQueueMerge(`[QUEUE MERGE] ${filename}: existing ${existingList.length} + incoming ${incomingList.length} = ${existingList.length + incomingList.length}`);
+        } catch (mergeError) {
+          // If merge fails, fall back to incoming content
+          finalContent = content;
+          logQueueMerge(`[QUEUE MERGE] ${filename}: merge failed (${mergeError.message}); falling back to incoming content`);
+        }
+      } else {
+        try {
+          const incomingJson = JSON.parse(content);
+          const incomingList = Array.isArray(incomingJson?.vulnerabilities) ? incomingJson.vulnerabilities : [];
+          logQueueMerge(`[QUEUE MERGE] ${filename}: no existing queue; incoming ${incomingList.length}`);
+        } catch (parseError) {
+          logQueueMerge(`[QUEUE MERGE] ${filename}: no existing queue; incoming (unparsed)`);
+        }
+      }
+
+      const queueValidation = validateQueueJson(finalContent);
       if (!queueValidation.valid) {
         const errorResponse = createValidationError(
           queueValidation.message,
@@ -104,7 +153,7 @@ export async function saveDeliverable(args) {
 
     // Get filename and save file
     const filename = DELIVERABLE_FILENAMES[deliverable_type];
-    const { filepath, filename: finalFilename } = saveDeliverableFile(filename, content);
+    const { filepath, filename: finalFilename } = saveDeliverableFile(filename, finalContent);
 
     // Success response
     const successResponse = {

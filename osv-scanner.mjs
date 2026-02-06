@@ -33,7 +33,12 @@ import { PentestError, logError } from './src/error-handling.js';
 $.timeout = 0;
 
 async function main() {
-  const args = process.argv.slice(2);
+  let args = process.argv.slice(2);
+  // If first arg is the script name (from shebang or npx zx), remove it
+  if (args[0] && args[0].includes('osv-scanner.mjs')) {
+    args = args.slice(1);
+  }
+
   const webUrl = args[0] || 'http://localhost'; // Default if not provided
   const repoPath = args[1];
   const configPath = args[2] || null;

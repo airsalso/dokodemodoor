@@ -47,6 +47,8 @@ Repository: {{REPO_PATH}}
 2. **SECONDARY (Context & Infrastructure, TRUNCATED SAFE VIEWS):**
    - `deliverables/_report_inputs/pre_recon_deliverable.md` - Use ONLY for tech stack and automated scan results. If the file includes embedded code analysis, treat it as non-authoritative context and do not use it for verified findings.
    - `deliverables/_report_inputs/recon_deliverable.md` - Use ONLY for attack surface mapping.
+   - `deliverables/_report_inputs/recon_verify_deliverable.md` - Use ONLY for verified File:Line pointers and evidence overlay.
+   - `deliverables/_report_inputs/api_fuzzer_deliverable.md` - Use ONLY for fuzzing-derived hotspots and stability issues.
 
 3. **TERTIARY (Evidence Index ONLY, TRUNCATED SAFE VIEWS):**
    - `deliverables/_report_inputs/auth_exploitation_evidence.json`

@@ -1,31 +1,37 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `dokodemodoor.mjs` is the main CLI entrypoint (ESM). Core logic lives in `src/` with submodules such as `src/ai/`, `src/cli/`, `src/config/`, and `src/phases/`.
-- `mcp-server/` is a companion service with its own `package.json` and dependencies.
-- Runtime artifacts are written to `audit-logs/`, `deliverables/`, and `repos/`; treat these as generated outputs.
-- Configuration lives in `configs/` (e.g., `configs/juiceshop-config.yaml`). Prompts are in `prompts-openai/`.
+- `dokodemodoor.mjs` is the CLI entrypoint.
+- Core logic lives in `src/` (session/agent orchestration, config loading, utilities).
+- MCP tools are implemented in `mcp-server/src/`.
+- Agent prompts are in `prompts-openai/` with shared fragments under `prompts-openai/shared/`.
+- Runtime configuration is stored in `configs/` (YAML plus `config-schema.json`).
+- Generated artifacts go to `deliverables/`, `audit-logs/`, `sessions/`, and `repos/` (all auto-created at runtime).
 
 ## Build, Test, and Development Commands
-- `npm run build` or `make build`: installs root deps and `mcp-server` deps.
-- `npm start`: runs `./dokodemodoor.mjs` directly.
-- `make run`: executes `./run.sh` (example invocation with a target URL and config).
-- `npm run translate-report` or `make translate`: runs `scripts/translate-report.mjs`.
-- `npm run clean` or `make clean`: clears generated artifacts (`audit-logs/`, `deliverables/`, `repos/`, etc.).
+- `npm run build`: installs dependencies in the root and `mcp-server/`.
+- `npm start`: runs `./dokodemodoor.mjs` (CLI entrypoint).
+- `./dokodemodoor.mjs "<target-url>" "<target-repo>" --config configs/example-config.yaml`: run the full pipeline.
+- `./dokodemodoor.mjs ... --phase vulnerability-analysis` or `--agent sqli-vuln`: run a subset.
+- `npm run translate-report`: translate the final report using `scripts/translate-report.mjs`.
+- `npm run clean`: remove generated state (`audit-logs/`, `sessions/`, `deliverables/`, `repos/`).
 
 ## Coding Style & Naming Conventions
-- JavaScript uses ESM imports/exports and 2-space indentation (match existing files in `src/`).
-- Prefer descriptive, domain-specific filenames (e.g., `queue-validation.js`, `progress-indicator.js`).
-- Keep CLI flows in `src/cli/` and shared utilities in `src/utils/`.
+- JavaScript uses ESM (`import ... from`), semicolons, and 2-space indentation.
+- Prefer descriptive filenames in `kebab-case` (e.g., `checkpoint-manager.js`).
+- Keep functions small and focused; use JSDoc-style block comments where the code is non-obvious.
+- No formatter or linter is configured; match existing style in `src/`.
 
 ## Testing Guidelines
-- No first-party test runner is configured and there is no `test` script.
-- If you add tests, introduce a `test/` directory and wire an npm script (e.g., `npm run test`) in the same PR.
+- No automated test framework is currently present.
+- Validate changes by running the CLI against a known target and inspecting outputs in `deliverables/` and `audit-logs/`.
+- If you add tests, document how to run them here and keep them fast and deterministic.
 
 ## Commit & Pull Request Guidelines
-- Recent commits use short, imperative, sentence-case subjects (e.g., “Handle README case in read_file”).
-- PRs should describe the change, list manual validation steps (if any), and call out impacts on generated outputs or configs.
+- Recent history uses checkpoint-style commits like `Checkpoint: <Agent/Step>` (sometimes with emoji). Follow this pattern for automated runs; for feature work use short, imperative messages.
+- PRs should include a concise summary, steps to reproduce, and any new/updated config paths (e.g., `configs/*.yaml`).
+- Include sample outputs or screenshots when changes affect reports or UI/CLI output.
 
 ## Security & Configuration Tips
-- Store secrets in `.env` and avoid committing values; reference config files under `configs/` instead.
-- Generated outputs in `audit-logs/`, `deliverables/`, and `repos/` should not be edited manually unless debugging.
+- Store secrets in `.env` (e.g., `OPENAI_API_KEY`, `VLLM_BASE_URL`) and avoid committing them.
+- Treat `configs/` as executable instructions for agents; review changes carefully before running against real targets.

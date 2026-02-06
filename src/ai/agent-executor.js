@@ -6,7 +6,7 @@ import { dirname } from 'path';
 // Provider abstraction layer
 import { getProvider } from './llm-provider.js';
 import { toolRegistry, registerMCPTools } from './tools/tool-registry.js';
-import { config, isVLLMProvider } from '../config/env.js';
+import { config as envConfig, isVLLMProvider } from '../config/env.js';
 import { runWithContext } from '../utils/context.js';
 import { isRetryableError, getRetryDelay, PentestError } from '../error-handling.js';
 import { ProgressIndicator } from '../progress-indicator.js';
@@ -15,8 +15,9 @@ import { formatDuration } from '../audit/utils.js';
 import { createGitCheckpoint, commitGitSuccess, rollbackGitWorkspace, getGitHeadHash } from '../utils/git-manager.js';
 import { AGENT_VALIDATORS, MCP_AGENT_MAPPING, PHASE_TOOL_REQUIREMENTS, AGENT_TOOL_OVERRIDES } from '../constants.js';
 import { filterJsonToolCalls, getAgentPrefix } from '../utils/output-formatter.js';
-import { generateSessionLogPath } from '../session-manager.js';
+import { generateSessionLogPath, updateSession } from '../session-manager.js';
 import { AuditSession } from '../audit/index.js';
+
 import { createDokodemoDoorHelperServer } from '../../mcp-server/src/index.js';
 import { getLocalISOString } from '../utils/time-utils.js';
 import { spawn } from 'child_process';
@@ -152,6 +153,11 @@ function getAgentPhase(agentName) {
     return 'reconnaissance';
   }
 
+  // Phase 2.5: API Fuzzing
+  if (agentName === 'api-fuzzer') {
+    return 'api-fuzzing';
+  }
+
   // Phase 3: Vulnerability Analysis
   if (agentName.endsWith('-vuln')) {
     return 'vulnerability-analysis';
@@ -271,6 +277,27 @@ async function validateAgentOutput(result, agentName, sourceDir, auditSession) {
  * - MCP 서버 실행, 로그 기록, 도구 호출 수행
  */
 async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context = '', description = 'Agent analysis', agentName = null, colorFn = chalk.cyan, sessionMetadata = null, auditSession = null, attemptNumber = 1) {
+  // Use global envConfig as base
+  let config = { ...envConfig };
+
+  // Load custom project config if configFile is present in sessionMetadata
+  if (sessionMetadata && sessionMetadata.configFile) {
+    try {
+      const { loadConfig } = await import('../config/config-loader.js');
+      const configPath = sessionMetadata.configFile;
+      const configResult = await loadConfig(configPath);
+      if (configResult && configResult.config) {
+        // Project config overrides/merges with env config
+        // Note: project config typically has top-level keys like 'mcpServers', 'rules', 'authentication'
+        config = { ...config, ...configResult.config };
+        console.log(chalk.gray(`    ⚙️  Applied project configuration from ${configPath}`));
+      }
+    } catch (err) {
+      // Non-fatal, we just use the base config
+      console.log(chalk.yellow(`    ⚠️  Could not load project config from session: ${err.message}`));
+    }
+  }
+
   const timer = new Timer(`agent-${description.toLowerCase().replace(/\s+/g, '-')}`);
   const fullPrompt = context ? `${context}\n\n${prompt}` : prompt;
   let totalCost = 0;
@@ -327,7 +354,9 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
     // Provider-specific setup
     let queryOptions = {
       cwd: sourceDir,
-      maxTurns: config.llm.vllm.maxTurns,
+      maxTurns: (agentName && config.dokodemodoor.agentMaxTurns[agentName])
+                  || config.llm.vllm.maxTurns
+                  || 100,
       agentName: agentName,
       parentTurnCount: null  // Will be set by TaskAgent when calling sub-agents
     };
@@ -450,20 +479,34 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
     try {
       // Use provider's query method
       // Wrap the entire query turn in context to isolate state
-      await runWithContext({ agentName: agentName || description, targetDir: sourceDir, auditSession }, async () => {
+      await runWithContext({
+        agentName: agentName || description,
+        targetDir: sourceDir,
+        auditSession,
+        webUrl: sessionMetadata?.webUrl || null
+      }, async () => {
         for await (const message of provider.query(fullPrompt, queryOptions)) {
           messageCount++;
 
-          // Periodic heartbeat for long-running agents (only when loader is disabled)
+          // Periodic heartbeat for long-running agents
           const now = Date.now();
-          if (global.DOKODEMODOOR_DISABLE_LOADER && now - lastHeartbeat > HEARTBEAT_INTERVAL) {
-            // Determine if this is a sub-agent based on description
-            const isSubAgent = description.toLowerCase().includes('sub-agent') || description.toLowerCase().includes('taskagent');
-            const turnDisplay = isSubAgent && parentTurnCount ? `Turn ${parentTurnCount}-${turnCount}` : `Turn ${turnCount}`;
-            const turnColor = isSubAgent ? chalk.cyan : chalk.blue;
-            console.log(turnColor(`    ⏱️  [${Math.floor((now - timer.startTime) / 1000)}s] ${description} running... (${turnDisplay})`));
+          if (now - lastHeartbeat > HEARTBEAT_INTERVAL) {
+            // 1. Log heartbeat to console if loader is disabled
+            if (global.DOKODEMODOOR_DISABLE_LOADER) {
+              const isSubAgent = description.toLowerCase().includes('sub-agent') || description.toLowerCase().includes('taskagent');
+              const turnDisplay = isSubAgent && parentTurnCount ? `Turn ${parentTurnCount}-${turnCount}` : `Turn ${turnCount}`;
+              const turnColor = isSubAgent ? chalk.cyan : chalk.blue;
+              console.log(turnColor(`    ⏱️  [${Math.floor((now - timer.startTime) / 1000)}s] ${description} running... (${turnDisplay})`));
+            }
+
+            // 2. Update session heartbeat in store to prevent stale detection
+            if (sessionMetadata && sessionMetadata.id) {
+              updateSession(sessionMetadata.id, { lastActivity: getLocalISOString() }).catch(() => {});
+            }
+
             lastHeartbeat = now;
           }
+
 
           if (message.type === "assistant") {
             turnCount++;
@@ -876,7 +919,7 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
       await auditSession.startAgent(agentName, fullPrompt, attempt);
 
       // Print debug log path if enabled
-      if (config.dokodemodoor.agentDebugLog) {
+      if (envConfig.dokodemodoor.agentDebugLog) {
         const debugLogPath = auditSession.getDebugLogPath();
         if (debugLogPath) {
           console.log(chalk.gray(`    📝 Agent Dialogue Log: ${debugLogPath}`));

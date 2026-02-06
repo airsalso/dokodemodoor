@@ -71,6 +71,12 @@ Repository Path: {{REPO_PATH}}
 {{RULES_AVOID}}
 </rules>
 
+### 4.4 Repository Path Rules (MANDATORY)
+- The repository root is **{{REPO_PATH}}**. Treat it as absolute and authoritative.
+- **Never** guess paths like `repos/...` or use relative guesses (e.g., `../`).
+- If a path fails, **retry only within {{REPO_PATH}}**.
+- Do **not** run recursive dumps like `ls -R .` or `ls -R {{REPO_PATH}}`. Use targeted discovery (e.g., `rg --files {{REPO_PATH}} | head -n 200`).
+
 ---
 
 ## 5) STATE MANAGEMENT & PERSISTENCE (CORE MEMORY)
@@ -102,7 +108,7 @@ You must follow the phased approach below.
 - Map auth flows, token/session handling, authz checks, RBAC/ABAC, tenant isolation
 - Pinpoint cookie flags configuration if cookies are used
 
-4) **API Schema Harvester {{SCHEMATHESIS_BANNER}}**
+4) **API Schema Harvester**
 - Locate any OpenAPI/Swagger/GraphQL schema files (e.g., `swagger.json`, `openapi.yaml`, `schema.graphql`).
 - If found, you MUST use `write_to_file` to save a copy of these files to the `outputs/schemas/` directory within the repository.
 - This enables automated fuzzing in the next wave.
@@ -122,6 +128,7 @@ You must follow the phased approach below.
 - Deduplicate findings, reconcile conflicts
 - Produce the report in the required structure
 - Explicitly add **Attack Hypotheses** per entry point so downstream agents can execute
+ - **Dedup rule**: When listing endpoints, keep one row per unique `method + path` only. If duplicates are found, merge notes and keep the strongest hypothesis.
 
 ---
 
@@ -140,6 +147,15 @@ If you cannot fully enumerate (time/tool limits, massive repo), you must still:
 - Provide a prioritized “next files to inspect” list
 
 Never block the workflow waiting for perfection.
+
+### 7.3 Anti-Noise Guard (MANDATORY)
+- Do **not** dump every middleware/global handler line into the attack surface table.
+- Prefer **route definitions** (explicit HTTP method handlers, router definitions, route files) and known static mount points.
+- If you must reference middleware, summarize once in the Architecture section, not in the endpoint list.
+
+### 7.4 Search Accuracy (MANDATORY)
+- Prefer `rg` for pattern searches. It handles complex patterns reliably.
+- If you use `grep` for alternation, always use `grep -E` (e.g., `grep -E "app\\.(get|post|put)"`).
 
 ---
 

@@ -27,11 +27,9 @@
  */
 
 export const DeliverableType = {
-  // Pre-recon agent
-  CODE_ANALYSIS: 'CODE_ANALYSIS',
-
-  // Recon agent
+ // Master Recon Map (Primary deliverable)
   RECON: 'RECON',
+  RECON_VERIFY: 'RECON_VERIFY',
 
   // Vulnerability analysis agents
   SQLI_ANALYSIS: 'SQLI_ANALYSIS',
@@ -67,10 +65,21 @@ export const DeliverableType = {
   AUTH_EVIDENCE: 'AUTH_EVIDENCE',
   AUTHZ_EVIDENCE: 'AUTHZ_EVIDENCE',
   SSRF_EVIDENCE: 'SSRF_EVIDENCE',
+
+  // Reporting and specialized tasks
   FINAL_REPORT: 'FINAL_REPORT',
   SUMMARY_REPORT: 'SUMMARY_REPORT',
   OSV_REPORT: 'OSV_REPORT',
+  OSV_QUEUE: 'OSV_QUEUE',
+
+  // API Fuzzing & Authentication
+  API_FUZZ_REPORT: 'API_FUZZ_REPORT',
+  AUTH_SESSION: 'AUTH_SESSION',
+
+  // Pre-recon agent (Bottom to prevent accidental reuse in later phases)
+  CODE_ANALYSIS: 'CODE_ANALYSIS',
 };
+
 
 /**
  * [목적] Deliverable 타입과 파일명 매핑 정의.
@@ -84,6 +93,7 @@ export const DeliverableType = {
 export const DELIVERABLE_FILENAMES = {
   [DeliverableType.CODE_ANALYSIS]: 'code_analysis_deliverable.md',
   [DeliverableType.RECON]: 'recon_deliverable.md',
+  [DeliverableType.RECON_VERIFY]: 'recon_verify_deliverable.md',
   [DeliverableType.SQLI_ANALYSIS]: 'sqli_analysis_deliverable.md',
   [DeliverableType.SQLI_QUEUE]: 'sqli_exploitation_queue.json',
   [DeliverableType.CODEI_ANALYSIS]: 'codei_analysis_deliverable.md',
@@ -111,7 +121,11 @@ export const DELIVERABLE_FILENAMES = {
   [DeliverableType.FINAL_REPORT]: 'comprehensive_security_assessment_report.md',
   [DeliverableType.SUMMARY_REPORT]: 'pentest_summary.md',
   [DeliverableType.OSV_REPORT]: 'osv_analysis_deliverable.md',
+  [DeliverableType.OSV_QUEUE]: 'osv_exploitation_queue.json',
+  [DeliverableType.API_FUZZ_REPORT]: 'api_fuzzer_deliverable.md',
+  [DeliverableType.AUTH_SESSION]: 'auth_session.json',
 };
+
 
 /**
  * [목적] 큐(JSON) 검증이 필요한 타입 목록 정의.
@@ -128,6 +142,7 @@ export const QUEUE_TYPES = [
   DeliverableType.AUTH_QUEUE,
   DeliverableType.AUTHZ_QUEUE,
   DeliverableType.SSRF_QUEUE,
+  DeliverableType.OSV_QUEUE,
 ];
 
 /**

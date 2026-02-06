@@ -42,6 +42,20 @@ export function getTargetDir() {
 }
 
 /**
+ * [목적] 현재 컨텍스트의 대상 웹 URL 조회.
+ *
+ * [호출자]
+ * - bash 도구 실행 시 URL 검증 로직
+ *
+ * [반환값]
+ * - string|null
+ */
+export function getWebUrl() {
+  const store = agentContext.getStore();
+  return store?.webUrl || global.__DOKODEMODOOR_WEB_URL || null;
+}
+
+/**
  * [목적] 에이전트 컨텍스트에서 함수를 실행.
  *
  * [호출자]

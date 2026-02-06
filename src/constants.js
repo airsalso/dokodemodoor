@@ -48,7 +48,11 @@ export const PHASE_TOOL_REQUIREMENTS = Object.freeze({
   'reconnaissance': {
     playwright: true   // Runtime analysis, API discovery, auth flow
   },
+  'api-fuzzing': {
+    playwright: false  // CLI-based tools like Schemathesis
+  },
   'vulnerability-analysis': {
+
     playwright: true   // XSS execution, CSRF token extraction, auth state
   },
   'exploitation': {
@@ -81,15 +85,19 @@ export const AGENT_TOOL_OVERRIDES = Object.freeze({
 // Only agents that actually need Playwright should be listed here
 export const MCP_AGENT_MAPPING = Object.freeze({
   // Phase 1: Pre-reconnaissance
-  // REMOVED: pre-recon doesn't need Playwright (static analysis only)
+  'pre-recon-code': 'dokodemodoor-helper', // Static analysis only; avoid Playwright fallback
 
   // Phase 2: Reconnaissance
   'recon': 'playwright-agent2',
-  // REMOVED: recon-verify doesn't need Playwright (code verification only)
+  // recon-verify doesn't need Playwright; map to local MCP for prompt interpolation
+  'recon-verify': 'dokodemodoor-helper',
   // Pre-flight login verification
   'login-check': 'playwright-agent2',
 
-  // Phase 3: Vulnerability Analysis (Parallel agents)
+  // Phase 3: API Fuzzing (Non-browser)
+  'api-fuzzer': 'api-fuzzer-agent',
+
+  // Phase 4: Vulnerability Analysis (Parallel agents)
   'vuln-sqli': 'playwright-agent1',
   'vuln-codei': 'playwright-agent1',
   'vuln-ssti': 'playwright-agent1',
@@ -137,10 +145,31 @@ export const AGENT_VALIDATORS = Object.freeze({
   },
   'recon-verify': async (sourceDir) => {
     const reconFile = path.join(sourceDir, 'deliverables', 'recon_deliverable.md');
-    // For recon-verify, we expect the report to exist and contain hardening markers
+    const reconVerifyFile = path.join(sourceDir, 'deliverables', 'recon_verify_deliverable.md');
     if (!(await fs.pathExists(reconFile))) return false;
-    const content = await fs.readFile(reconFile, 'utf8');
-    return content.includes('HARDENED') || content.includes('Hardened Recon Deliverable');
+    if (!(await fs.pathExists(reconVerifyFile))) return false;
+    const content = await fs.readFile(reconVerifyFile, 'utf8');
+    return content.includes('Recon Verification Deliverable') || content.includes('RECON VERIFY');
+  },
+  'api-fuzzer': async (sourceDir) => {
+    const deliverablesDir = path.join(sourceDir, 'deliverables');
+    const reconFile = path.join(deliverablesDir, 'recon_deliverable.md');
+    const apiFuzzFile = path.join(deliverablesDir, 'api_fuzzer_deliverable.md');
+
+    const reconExists = await fs.pathExists(reconFile);
+    const apiFuzzExists = await fs.pathExists(apiFuzzFile);
+
+    if (!reconExists) {
+      console.log(chalk.red(`    ❌ Missing required deliverable: recon_deliverable.md (Master Recon Map)`));
+      return false;
+    }
+    if (!apiFuzzExists) {
+      console.log(chalk.red(`    ❌ Missing required deliverable: api_fuzzer_deliverable.md (Fuzzing Working Memory)`));
+      console.log(chalk.yellow(`    💡 Hint: Ensure the agent saves with deliverable_type: "API_FUZZ_REPORT"`));
+      return false;
+    }
+
+    return true;
   },
 
   // Vulnerability analysis agents
@@ -199,8 +228,15 @@ export const AGENT_VALIDATORS = Object.freeze({
   // OSV Analysis agent
   'osv-analysis': async (sourceDir) => {
     const osvFile = path.join(sourceDir, 'deliverables', 'osv_analysis_deliverable.md');
-    // Also check for the generic deliverable if the agent uses a different name
-    const genericOsvFile = path.join(sourceDir, 'deliverables', 'osv_report.md');
-    return (await fs.pathExists(osvFile)) || (await fs.pathExists(genericOsvFile));
+    const queueFile = path.join(sourceDir, 'deliverables', 'osv_exploitation_queue.json');
+
+    const osvExists = await fs.pathExists(osvFile);
+    const queueExists = await fs.pathExists(queueFile);
+
+    if (!osvExists || !queueExists) {
+      console.log(chalk.red(`    ❌ Missing required deliverable: ${!osvExists ? 'osv_analysis_deliverable.md' : 'osv_exploitation_queue.json'}`));
+      return false;
+    }
+    return true;
   }
 });

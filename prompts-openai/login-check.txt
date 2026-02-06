@@ -68,6 +68,21 @@ Target URL: {{WEB_URL}}
    - Report whether auth cookies exist (names only)
    - Report whether localStorage/sessionStorage contains auth tokens (key names only)
 
+10. **SAVE AUTH SESSION (MANDATORY)**:
+   - After successful login, you MUST extract and save the following authentication data using `save_deliverable` with `deliverable_type: "AUTH_SESSION"`:
+     - **Cookies**: Full list of cookies (name, value, domain, path)
+     - **LocalStorage/SessionStorage**: Any keys and values that appear to be authentication tokens (JWTs, session IDs, etc.)
+     - **Headers**: If you can see common request headers (from browser network events), include them.
+   - Format the content as a JSON object:
+     ```json
+     {
+       "cookies": [...],
+       "storage": { "localStorage": {...}, "sessionStorage": {...} },
+       "headers": { "Authorization": "Bearer ...", "X-API-Key": "..." }
+     }
+     ```
+   - This information is CRITICAL for downstream agents to perform authenticated scanning.
+
 ---
 
 ## 3) STATE MANAGEMENT & SYNCHRONIZATION
@@ -105,6 +120,5 @@ The button is disabled, so I analyzed the source code...
 **Rules**:
 1. Your LAST line must be either LOGIN_SUCCESS or LOGIN_FAILURE (nothing else)
 2. Before the status line, provide a 2-6 line summary of what you did
-3. Do NOT call save_deliverable
+3. You MUST call save_deliverable with deliverable_type: "AUTH_SESSION" after successful login.
 4. Do NOT output anything after the status line
-

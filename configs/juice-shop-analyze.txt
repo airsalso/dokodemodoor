@@ -1,0 +1,95 @@
+**Application Context Summary**
+
+**[Application Identity]**  
+- **Name / Identifier:** OWASP Juice Shop  
+- **Category:** Web‑based e‑commerce application (interactive storefront with administrative back‑office)  
+- **Primary Business Purpose:** Demonstrate a realistic, intentionally vulnerable online shop for security training, awareness, and tool validation.  
+- **Intended User Types:**  
+  - Anonymous visitors (browse catalog, view product details)  
+  - Registered users (login, manage profile, place orders, view order history)  
+  - Administrators (access admin panel for product, order, and user management)  
+  - Enterprise customers (access B2B JSON API for order placement)
+
+**[Architecture Overview]**  
+- **High‑level Structure:** Single‑page application (SPA) frontend served from `/frontend/dist` with an Express/Node.js backend providing RESTful APIs.  
+- **API‑centric:** All core functionality is exposed via HTTP/JSON endpoints; the SPA consumes these APIs.  
+- **Deployment Assumptions:**  
+  - Containerized (Docker image `bkimminich/juice-shop:latest`)  
+  - Exposes port 3000; can be run behind a reverse proxy or load balancer.  
+  - Uses Node.js 22 runtime; built with TypeScript and bundled into a single `build/app.js`.  
+- **Communication Patterns:**  
+  - Browser ↔︎ Server: HTTP(S) with JSON payloads, form data, and file uploads.  
+  - Server ↔︎ External services: outbound HTTP requests (e.g., email, payment simulation).  
+
+**[Authentication & Authorization Model]**  
+- **Authentication Required:** Yes for most user‑centric actions (cart, checkout, profile).  
+- **Login/Logout Flow:** Users authenticate via `/auth/login` (form or JSON). Successful login establishes a session cookie; logout clears the session.  
+- **Session Management:** Cookie‑based session stored server‑side; no JWTs for standard user flows.  
+- **Role‑Based Access:**  
+  - Standard users: access to product browsing, cart, checkout, order history.  
+  - Administrators: access to `/admin` routes for product, order, user, and system configuration management.  
+- **Tenant/Enterprise Access:** Enterprise customers use the B2B API (`/b2b/v2`) with bearer JWT authentication for order placement.
+
+**[Primary Functional Areas]**  
+- **User Management:** Registration, login, profile editing, password reset, security questions, privacy requests.  
+- **Product & Catalog Management:** Product listing, details, categories, inventory, pricing.  
+- **Shopping Cart & Checkout:** Add/remove items, apply coupons, calculate totals, simulate payment.  
+- **Order Processing:** Order creation, confirmation, status tracking, order history.  
+- **Feedback & Complaints:** Submit product feedback, file complaints, view status.  
+- **Administrative Features:** CRUD for products, users, orders, challenges; system configuration; view logs.  
+- **Challenge / CTF Features:** Embedded security challenges (e.g., hidden Easter eggs, hidden endpoints).  
+- **B2B API:** JSON‑based order placement for enterprise customers.
+
+**[Endpoint Landscape (Conceptual)]**  
+- **Base Paths:**  
+  - `/api` – core REST endpoints for products, cart, orders, users.  
+  - `/auth` – authentication endpoints (login, logout, register).  
+  - `/admin` – administrative CRUD operations.  
+  - `/b2b/v2` – B2B order API (Swagger documented).  
+- **Endpoint Types:**  
+  - CRUD‑style APIs (GET, POST, PUT, DELETE).  
+  - Authentication flows (POST to `/auth/login`).  
+  - File upload endpoints (e.g., profile picture).  
+  - WebSocket events for real‑time updates.  
+- **Access Level Differences:**  
+  - Public: product catalog, static assets.  
+  - Authenticated: cart, checkout, profile.  
+  - Admin: `/admin/*` routes.  
+  - B2B: `/b2b/v2/*` with bearer token.
+
+**[Data & Interaction Characteristics]**  
+- **Data Types Handled:**  
+  - User data (credentials, profile, security questions).  
+  - Product data (ID, name, description, price, inventory).  
+  - Order data (order ID, items, status, payment info).  
+  - Cart data (session‑based or user‑based).  
+  - Feedback, complaints, challenges, privacy requests.  
+- **Input Mechanisms:**  
+  - JSON payloads for API calls.  
+  - HTML forms for registration, login, profile updates.  
+  - File uploads for user avatars or documents.  
+- **Identifier Patterns:**  
+  - Numeric or UUID IDs for products, orders, users.  
+  - Ownership enforced via session/user context.
+
+**[External Dependencies & Integrations]**  
+- **Email Service:** Outbound SMTP or mock service for account verification and notifications.  
+- **Payment Simulation:** Internal mock payment gateway for checkout flows.  
+- **FTP / File System:** Temporary storage for uploaded files (e.g., avatars).  
+- **Monitoring & Metrics:** Prometheus client for application metrics.  
+- **Swagger UI:** Exposes API documentation at `/api-docs` (or similar).  
+
+**[Expected Normal Behavior]**  
+- **Anonymous User:** Browse catalog, view product details, add items to cart (session‑based).  
+- **Registered User:** Log in, manage profile, view order history, place orders, receive confirmation.  
+- **Administrator:** Log in to `/admin`, manage products, view all orders, adjust system settings.  
+- **Enterprise Customer:** Authenticate via JWT, POST to `/b2b/v2/orders` to place orders, receive confirmation JSON.  
+
+**[Operational Notes for Black‑Box Testing]**  
+- **Authentication Required:** Many endpoints require a valid session cookie or JWT; tests should first perform a login or obtain a token.  
+- **Environment Variability:** Some features (e.g., email, payment simulation) may behave differently in development vs. production; results should be interpreted accordingly.  
+- **Rate Limiting & Security Headers:** The application applies rate limits and security headers; normal traffic may be throttled or blocked if thresholds are exceeded.  
+- **Easter Eggs & Hidden Endpoints:** The application intentionally includes hidden or obfuscated endpoints; normal navigation may not reveal them.  
+- **Metrics Endpoint:** Prometheus metrics are exposed; normal operation includes periodic metric collection.  
+
+---

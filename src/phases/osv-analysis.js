@@ -63,8 +63,33 @@ export async function executeOsvAnalysisPhase(session, runAgentPromptWithRetry, 
     'OSV Analysis Agent',
     'osv-analysis',
     chalk.magenta,
-    { id: session.id, webUrl: session.webUrl, repoPath: session.repoPath }
+    { id: session.id, webUrl: session.webUrl, repoPath: session.repoPath, configFile: session.configFile }
   );
+
+  // 4. Automatic Consistency Check
+  if (result.success) {
+    try {
+      const reportFile = path.join(sourceDir, 'deliverables', 'osv_analysis_deliverable.md');
+      const queueFile = path.join(sourceDir, 'deliverables', 'osv_exploitation_queue.json');
+
+      if (await fs.pathExists(reportFile) && await fs.pathExists(queueFile)) {
+        const reportContent = await fs.readFile(reportFile, 'utf8');
+        const queueData = await fs.readJson(queueFile);
+
+        const reportMatchCount = (reportContent.match(/^### /gm) || []).length;
+        const queueCount = queueData.vulnerabilities?.length || 0;
+
+        if (reportMatchCount !== queueCount) {
+          console.log(chalk.yellow(`\n⚠️  Consistency Warning: Report has ${reportMatchCount} items, but Queue has ${queueCount} items.`));
+          console.log(chalk.gray(`   Please ensure the agent saves all confirmed vulnerabilities in both formats.`));
+        } else {
+          console.log(chalk.green(`\n✅ Consistency Verified: Both deliverables contain ${queueCount} vulnerabilities.`));
+        }
+      }
+    } catch (err) {
+      // Non-critical check, ignore errors
+    }
+  }
 
   return result;
 }

@@ -322,7 +322,7 @@ async function runPreReconWave2(webUrl, sourceDir, toolAvailability) {
   console.log(chalk.blue('    → Running Wave 2 additional scans in parallel...'));
 
   const { config: envConfig } = await import('../config/env.js').catch(() => ({ config: null }));
-  const skipSchemathesis = envConfig?.dokodemodoor?.skipSchemathesis || false;
+  const skipSchemathesis = envConfig?.dokodemodoor?.skipSchemathesis ?? true;
 
   const operations = [];
 

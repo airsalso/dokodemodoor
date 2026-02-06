@@ -188,18 +188,26 @@ async function interpolateVariables(template, variables, config = null, baseDir 
 
     let result = template
       .replace(/{{WEB_URL}}/g, variables.webUrl)
-      .replace(/{{REPO_PATH}}/g, path.relative(process.cwd(), variables.repoPath) || '.')
+      .replace(/{{REPO_PATH}}/g, variables.repoPath)
       .replace(/{{MCP_SERVER}}/g, variables.MCP_SERVER || 'playwright-agent1')
       .replace(/{{VULNERABILITY_DATA}}/g, variables.vulnerabilityData || '[]')
       .replace(/{{XSS_TEST}}/g, 'DOKODEMO_XSS_MARKER');
 
     if (config) {
       // Prepare rules text
+      const formatRule = (rule) => {
+        const details = [];
+        if (rule.type) details.push(`type: ${rule.type}`);
+        if (rule.url_path) details.push(`path: ${rule.url_path}`);
+        const suffix = details.length ? ` (${details.join(', ')})` : '';
+        return `- ${rule.description}${suffix}`;
+      };
+
       const avoidRules = (config.avoid && config.avoid.length > 0)
-        ? config.avoid.map(r => `- ${r.description}`).join('\n')
+        ? config.avoid.map(formatRule).join('\n')
         : 'None';
       const focusRules = (config.focus && config.focus.length > 0)
-        ? config.focus.map(r => `- ${r.description}`).join('\n')
+        ? config.focus.map(formatRule).join('\n')
         : 'None';
 
       // Always replace placeholders regardless of rules existence
@@ -225,27 +233,7 @@ async function interpolateVariables(template, variables, config = null, baseDir 
       const loginUrl = config.authentication?.login_url || `${variables.webUrl}/login`;
       result = result.replace(/{{LOGIN_URL}}/g, loginUrl);
 
-      // Inject application profile context
-      let profileText = '';
-      if (config.profile) {
-        const sections = [
-          { key: 'application_overview', title: 'Application Overview' },
-          { key: 'technology_stack', title: 'Technology Stack' },
-          { key: 'authentication_architecture', title: 'Authentication Architecture' },
-          { key: 'api_endpoints', title: 'API Endpoints & Targets' },
-          { key: 'business_logic', title: 'Business Logic & Workflows' },
-          { key: 'data_flow', title: 'Data Flow & Persistence' },
-          { key: 'security_controls', title: 'Existing Security Controls' },
-          { key: 'known_vulnerabilities', title: 'Known Vulnerabilities (to verify)' },
-          { key: 'custom_notes', title: 'Custom Testing Notes' }
-        ];
-
-        profileText = sections
-          .filter(s => config.profile[s.key])
-          .map(s => `### ${s.title}\n${config.profile[s.key]}`)
-          .join('\n\n');
-      }
-      result = result.replace(/{{APP_PROFILE}}/g, profileText || 'No detailed application profile provided.');
+      // Application profile is intentionally not supported.
     } else {
       // Fallback for missing config
       const cleanRulesSection = '<rules>\nNo specific rules or focus areas provided for this test.\n</rules>';
@@ -255,7 +243,7 @@ async function interpolateVariables(template, variables, config = null, baseDir 
         .replace(/{{RULES_FOCUS}}/g, 'None')
         .replace(/{{LOGIN_INSTRUCTIONS}}/g, '')
         .replace(/{{LOGIN_URL}}/g, `${variables.webUrl}/login`)
-        .replace(/{{APP_PROFILE}}/g, 'No detailed application profile provided.');
+        ;
     }
 
     // Validate that all placeholders have been replaced (excluding instructional text and SSTI-style examples)

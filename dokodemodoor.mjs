@@ -47,6 +47,9 @@ import {
 // Configure zx to disable timeouts (let tools run as long as needed)
 $.timeout = 0;
 
+// Track active session globally for signal handlers
+let activeSessionId = null;
+
 // Setup graceful cleanup on process signals
 /**
  * [목적] SIGINT 처리 및 정상 종료.
@@ -62,6 +65,16 @@ $.timeout = 0;
  */
 process.on('SIGINT', async () => {
   console.log(chalk.yellow('\n⚠️ Received SIGINT, cleaning up...'));
+
+  if (activeSessionId) {
+    try {
+      // Mark session as interrupted if it was active
+      await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
+      console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as interrupted`));
+    } catch (e) {
+      // Ignore errors during exit cleanup
+    }
+  }
 
   process.exit(0);
 });
@@ -81,8 +94,46 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   console.log(chalk.yellow('\n⚠️ Received SIGTERM, cleaning up...'));
 
+  if (activeSessionId) {
+    try {
+      await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
+    } catch (e) {
+      // Ignore
+    }
+  }
+
   process.exit(0);
 });
+
+/**
+ * [목적] 예기치 않은 에러 처리 및 세션 상태 업데이트.
+ */
+process.on('uncaughtException', async (error) => {
+  console.log(chalk.red('\n🔥 Uncaught Exception!'));
+  console.error(error);
+
+  if (activeSessionId) {
+    try {
+      await updateSession(activeSessionId, { status: 'failed', lastActivity: getLocalISOString() });
+      console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as failed`));
+    } catch (e) {}
+  }
+
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+  console.log(chalk.red('\n🔥 Unhandled Rejection at:'), promise, 'reason:', reason);
+
+  if (activeSessionId) {
+    try {
+      await updateSession(activeSessionId, { status: 'failed', lastActivity: getLocalISOString() });
+    } catch (e) {}
+  }
+
+  process.exit(1);
+});
+
 
 // Main orchestration function
 /**
@@ -166,7 +217,9 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
 
   // Create session for tracking (in normal mode)
   const session = await createSession(webUrl, repoPath, configPath, sourceDir);
+  activeSessionId = session.id; // Set active session ID for global handlers
   console.log(chalk.blue(`📝 Session created: ${session.id.substring(0, 8)}...`));
+
 
   // Persist full console output to audit logs for debugging
   try {
@@ -292,10 +345,22 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     console.log(chalk.green(`✅ Reconnaissance phase complete in ${formatDuration(reconPhaseDuration)}`));
   }
 
-  // PHASE 3: VULNERABILITY ANALYSIS
+  // PHASE 3: API FUZZING
   if (startPhase <= 3) {
-    const vulnTimer = new Timer('phase-3-vulnerability-analysis');
-    console.log(chalk.red.bold('\n🚨 PHASE 3: VULNERABILITY ANALYSIS'));
+    console.log(chalk.cyan.bold('\n🔍 PHASE 3: API FUZZING (SCHEMATHESIS)'));
+    const fuzzPhaseTimer = new Timer('phase-3-api-fuzzing');
+
+    await runPhase('api-fuzzing', session, runAgentPromptWithRetry, loadPrompt);
+
+    const fuzzPhaseDuration = fuzzPhaseTimer.stop();
+    timingResults.phases['api-fuzzing'] = fuzzPhaseDuration;
+    console.log(chalk.green(`✅ API fuzzing phase complete in ${formatDuration(fuzzPhaseDuration)}`));
+  }
+
+  // PHASE 4: VULNERABILITY ANALYSIS
+  if (startPhase <= 4) {
+    const vulnTimer = new Timer('phase-4-vulnerability-analysis');
+    console.log(chalk.red.bold('\n🚨 PHASE 4: VULNERABILITY ANALYSIS'));
 
     await runPhase('vulnerability-analysis', session, runAgentPromptWithRetry, loadPrompt);
 
@@ -310,10 +375,11 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     console.log(chalk.green(`✅ Vulnerability analysis phase complete in ${formatDuration(vulnDuration)}`));
   }
 
-  // PHASE 4: EXPLOITATION
-  if (startPhase <= 4) {
-    const exploitTimer = new Timer('phase-4-exploitation');
-    console.log(chalk.red.bold('\n💥 PHASE 4: EXPLOITATION'));
+
+  // PHASE 5: EXPLOITATION
+  if (startPhase <= 5) {
+    const exploitTimer = new Timer('phase-5-exploitation');
+    console.log(chalk.red.bold('\n💥 PHASE 5: EXPLOITATION'));
 
     // Get fresh session data to ensure we have latest vulnerability analysis results
     const freshSession = await getSession(session.id);
@@ -332,15 +398,14 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     timingResults.phases['exploitation'] = exploitDuration;
   }
 
-  // PHASE 5: REPORTING
-  if (startPhase <= 5) {
-    console.log(chalk.greenBright.bold('\n📊 PHASE 5: REPORTING'));
-    console.log(chalk.greenBright('Generating executive summary and assembling final report...'));
-    const reportTimer = new Timer('phase-5-reporting');
 
-    // runPhase now handles assembleFinalReport and prepareReportInputs internally via runSingleAgent('report')
-    const sessionForReport = await getSession(session.id);
-    await runPhase('reporting', sessionForReport, runAgentPromptWithRetry, loadPrompt);
+  // PHASE 6: REPORTING
+  if (startPhase <= 6) {
+    console.log(chalk.greenBright.bold('\n📊 PHASE 6: REPORTING'));
+    console.log(chalk.greenBright('Generating executive summary and assembling final report...'));
+    const reportTimer = new Timer('phase-6-reporting');
+
+    await runPhase('reporting', session, runAgentPromptWithRetry, loadPrompt);
 
     const reportDuration = reportTimer.stop();
     timingResults.phases['reporting'] = reportDuration;
@@ -348,6 +413,22 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     console.log(chalk.green(`✅ Final report fully assembled in ${formatDuration(reportDuration)}`));
     console.log(chalk.cyan(`\n💡 To generate Korean translation, run: npm run translate-report`));
   }
+
+  // PHASE 7: OSV ANALYSIS
+  if (startPhase <= 7) {
+    console.log(chalk.cyan.bold('\n🔍 PHASE 7: OPEN SOURCE VULNERABILITY ANALYSIS'));
+    const osvTimer = new Timer('phase-7-osv-analysis');
+
+    // Load OSV phase logic
+    const { executeOsvAnalysisPhase } = await import('./src/phases/osv-analysis.js');
+    await executeOsvAnalysisPhase(session, runAgentPromptWithRetry, loadPrompt);
+
+    const osvDuration = osvTimer.stop();
+    timingResults.phases['osv-analysis'] = osvDuration;
+    console.log(chalk.green(`✅ OSV analysis phase complete in ${formatDuration(osvDuration)}`));
+  }
+
+
 
   // Calculate final timing and cost data
   const totalDuration = timingResults.total.stop();
@@ -370,6 +451,8 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     timingBreakdown,
     costBreakdown
   });
+  activeSessionId = null; // Clear active session after successful completion
+
 
   // Display comprehensive timing summary
   displayTimingSummary();

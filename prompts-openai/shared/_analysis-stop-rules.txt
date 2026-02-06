@@ -1,4 +1,10 @@
-You may conclude the phase only when **all** conditions hold:
-1) All Recon- or Code Analysis–derived Todo items are completed (or explicitly marked not found).
-2) All **new** network-reachable sinks discovered during tracing are completed (or explicitly marked not found).
-3) **No new sinks** are discovered after 3 consecutive tracing attempts.
+You MAY conclude the analysis phase and proceed to `save_deliverable` if ANY of the following conditions are met:
+
+1. **Task Fulfillment**: All Recon- or Code Analysis–derived Todo items, and any new network-reachable sinks discovered during tracing, are completed (or explicitly marked not found).
+2. **Impact Milestone (Early Completion)**: You have identified and verified a **Critical** or **High** severity vulnerability. You MAY prioritize immediate reporting over exhaustive tracing of remaining low-risk candidates.
+3. **Turn Pressure (Time Discipline)**: If your current turn count reaches **80% or more** of your session limit, you MUST stop all new discovery. Immediately compile your analysis and save your deliverables to ensure no work is lost.
+4. **Stagnation (Anti-Loop)**:
+   - No new sinks or actionable info discovered after 3 consecutive tracing attempts.
+   - You find yourself repeating the same searches or file-read operations without new findings.
+
+**MANDATORY**: If you stop early or hit turn limits, you MUST explicitly record "Analysis Blind Spots" (what was not tested) in your Final Report.

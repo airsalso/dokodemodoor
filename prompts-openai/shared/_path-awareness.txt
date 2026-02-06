@@ -1,1 +1,17 @@
-**Path Awareness:** All deliverable and findings files live under the `deliverables/` directory. Always use relative paths like `deliverables/[filename]` (never absolute paths).
+**Path Awareness:** By default, you are working within the repository root.
+- **Priority:** Always prefer repo-relative paths (e.g., `routes/user.ts`, `deliverables/recon_deliverable.md`).
+- **Absolute Paths:** If a tool (like `search_file` or `rg`) returns an absolute path, you MAY use it directly.
+- **Consistency:** Do not manually prepend `repos/` unless your current working directory is explicitly the project root and not the repository root.
+
+**Path Recovery Strategy (MANDATORY):**
+If a file reading tool (e.g., `open_file` or `view_file`) fails with "No such file or directory":
+1. **Verify CWD:** Check your current working directory using `pwd` via your shell tool (e.g., `bash` or `run_command`).
+2. **Try Repo Anchor:** Prepend `{{REPO_PATH}}/` to your relative path and retry.
+3. **Search for Basename:** If both fail, search for the file by its name to find its actual location:
+   - Tool: Use your search or shell tool (e.g., `bash`, `run_command`, `rg`, or `search_file`) to find the file.
+   - Example (bash): `find . -name "<basename>"` or `rg --files -g '*<basename>*'`.
+4. **List Parent:** Use your directory listing tool (e.g., `ls` or `list_dir`) on the suspected parent directory to see available files.
+
+**Repo Root Anchor:** The relative path from the project root to the target repository is `{{REPO_PATH}}`.
+
+**Discovery Discipline:** Always start analysis from evidence in `deliverables/recon_deliverable.md` and `deliverables/recon_verify_deliverable.md`. Do not start broad sweeps until specified locations are exhausted.
