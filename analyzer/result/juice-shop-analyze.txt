@@ -1,0 +1,67 @@
+[Application Identity]  
+- Application name or identifier: **OWASP Juice Shop**  
+- Application category: **User‑facing e‑commerce web application**  
+- Primary business purpose: Simulated online shop used for security training, awareness demos, and CTF challenges.  
+- Intended user types:  
+  - Anonymous visitors (no authentication required for browsing).  
+  - Registered customers (authenticated users).  
+  - Administrators (privileged users with access to management endpoints).
+
+[Architecture Overview]  
+- High‑level frontend/backend structure:  
+  - **Backend**: Node.js (Express) written in TypeScript, exposes RESTful APIs and serves server‑rendered pages.  
+  - **Frontend**: Angular application bundled in `frontend/dist/`, served by the same Node.js process.  
+- API‑centric with a clear separation of public and protected routes.  
+- Deployment assumptions: Containerized via Docker; image exposes port **3000**. Can be run behind a reverse proxy or in a cloud environment.  
+- Communication patterns: Browser‑based interaction using HTML/JavaScript; API communication over HTTP/JSON.
+
+[Authentication & Authorization Model]  
+- Authentication is required for most user‑specific and administrative endpoints.  
+- Session‑based authentication using HTTP cookies (middleware `security.isAuthorized()` checks session validity).  
+- Token‑based authentication is also supported via JWT for certain API routes (`bearerAuth` defined in Swagger).  
+- Role‑based access:  
+  - **Admin** role grants access to `/rest/admin/*` endpoints.  
+  - Regular users have access to `/rest/user/*`, `/api/Users`, `/api/Cards`, etc.  
+- Standard login/logout flows are provided (e.g., `/rest/user/login`, `/rest/user/logout`).
+
+[Primary Functional Areas]  
+- **User Management**: registration, login, password change, security questions, profile retrieval.  
+- **Product Catalog**: browsing, searching, detailed product views.  
+- **Shopping Basket**: add/remove items, view basket contents.  
+- **Checkout & Orders**: payment method selection, order creation, order confirmation.  
+- **Delivery Options**: list and retrieve delivery methods.  
+- **Administrative Features**: application version, configuration retrieval, user and order oversight.  
+- **Miscellaneous**: security challenges, privacy requests, complaints, recycle items.
+
+[Endpoint Landscape (Conceptual)]  
+- Common base paths: `/api`, `/rest`, `/rest/admin`, `/rest/user`, `/rest/2fa`, `/rest/continue-code`.  
+- Endpoint types:  
+  - CRUD‑style APIs for users (`/api/Users`), addresses (`/api/Addresss`), cards (`/api/Cards`), etc.  
+  - Read‑only endpoints for public data (products, delivery methods).  
+  - Admin endpoints for configuration and version information.  
+- Expected access level differences:  
+  - Public endpoints accessible without authentication.  
+  - User‑specific endpoints require authenticated session.  
+  - Admin endpoints require authenticated session with admin role.
+
+[Data & Interaction Characteristics]  
+- Data handled: user profiles, addresses, payment methods, product catalog, basket items, orders, security answers, complaints.  
+- Input mechanisms: JSON payloads for API calls, form submissions for browser interactions, file uploads for certain features (e.g., profile pictures).  
+- Identifier‑based access patterns: resources accessed via IDs in the URL (e.g., `/api/Users/:id`, `/api/Addresss/:id`, `/api/Recycles/:id`).
+
+[External Dependencies & Integrations]  
+- The application primarily uses local data storage (in‑memory or file‑based).  
+- Outbound communication may include email or SMS services for password reset or two‑factor authentication, but these are optional and configurable.  
+- No mandatory external API integrations are required for core functionality.
+
+[Expected Normal Behavior]  
+- **Anonymous user**: can browse products, search, add items to basket, and proceed to checkout as a guest or register.  
+- **Authenticated user**: can view and edit profile, manage addresses and payment methods, view order history, and change password.  
+- **Administrator**: can retrieve application version/configuration, manage users, and oversee orders.  
+- Successful requests return standard HTTP status codes (200 OK, 201 Created) with JSON payloads; error conditions return appropriate 4xx/5xx codes.
+
+[Operational Notes for Black‑Box Testing]  
+- Authentication is required to exercise protected endpoints; tests should first perform a login flow to obtain a session cookie or JWT.  
+- Some endpoints (e.g., `/rest/admin/*`) may be disabled or restricted in certain deployment environments; tests should verify access control responses.  
+- The application uses cookie‑based sessions; ensure that cookie handling (e.g., `Set-Cookie`, `SameSite` attributes) is correctly managed in the testing tool.  
+- Behavior may vary between development and production images (e.g., admin access, email/SMS integration); note any environment‑specific configuration flags.

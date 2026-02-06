@@ -6,28 +6,10 @@ import { $ } from 'zx';
 import { fileURLToPath } from 'url';
 import { config as envConfig } from '../src/config/env.js';
 
-const MAX_ROUTE_LINES = 120;
-const MAX_MATCH_LINES = 80;
-const MAX_FILE_CHARS = 2000;
-const MAX_CONTEXT_CHARS = 8000;
+// --- Constants & Config ---
 const MAX_RULES = 12;
+const MAX_CONTEXT_CHARS = 8000;
 const MAX_SPEC_FILES = 4;
-
-const buildDefaultLoginFlow = (loginUrlValue, usernameValue, passwordValue) => ([
-  `1. Navigate to ${loginUrlValue}`,
-  "2. (If Popup) Dismiss Welcome Modal: Click 'Close Welcome Banner'. If it is not visible or click times out once, note it and continue.",
-  "3. (If Popup) Dismiss Cookie Banner: Click 'Me want it!'. If it is not visible or click times out once, note it and continue.",
-  `4. Enter Email: Click input#email first to focus, then type '${usernameValue}'.`,
-  `5. Enter Password: Click input#password first to focus, then type '${passwordValue}'.`,
-  "6. Enable Login Button: Press 'Tab' (browser_press_key) to trigger Angular validation. Ensure button#loginButton is no longer disabled.",
-  '7. Click Login: Click button#loginButton.',
-  "8. Confirm: Wait for URL to include '/#/search'."
-]);
-
-const DEFAULT_SUCCESS_CONDITION = {
-  type: 'url_contains',
-  value: '/#/search'
-};
 
 const [repoPathArg, loginUrl, username, password, otp] = process.argv.slice(2);
 
@@ -37,439 +19,29 @@ if (!repoPathArg || !loginUrl || !username || !password) {
 }
 
 const repoPath = path.resolve(repoPathArg);
+const otpValue = otp?.trim() || null;
 
-const fileExists = async (filePath) => {
-  try {
-    const stat = await fs.stat(filePath);
-    return stat.isFile() || stat.isDirectory();
-  } catch {
-    return false;
+// --- Authentication (Hardcoded as per user request) ---
+const buildDefaultLoginFlow = (url, user, pass, otp) => {
+  const flow = [
+    `1. Navigate to ${url}`,
+    "2. (If Popup) Dismiss Welcome Modal: Click 'Close Welcome Banner'. If it is not visible or click times out once, note it and continue.",
+    "3. (If Popup) Dismiss Cookie Banner: Click 'Me want it!'. If it is not visible or click times out once, note it and continue.",
+    `4. Enter Email: Click input#email first to focus, then type '${user}'.`,
+    `5. Enter Password: Click input#password first to focus, then type '${pass}'.`,
+    "6. Enable Login Button: Press 'Tab' (browser_press_key) to trigger Angular validation. Ensure button#loginButton is no longer disabled.",
+    '7. Click Login: Click button#loginButton.'
+  ];
+
+  if (otp) {
+    flow.push(`8. Enter TOTP: Since 2FA is enabled, wait for the TOTP input field to appear and type '${otp}'.`);
+    flow.push('9. Submit TOTP: Click the 2FA verify/login button.');
+    flow.push("10. Confirm: Wait for URL to include '/#/search'.");
+  } else {
+    flow.push("8. Confirm: Wait for URL to include '/#/search'.");
   }
+  return flow;
 };
-
-if (!await fileExists(repoPath)) {
-  console.error(`Repository path not found: ${repoPath}`);
-  process.exit(1);
-}
-
-const readFileLimited = async (filePath, maxChars = MAX_FILE_CHARS) => {
-  try {
-    const content = await fs.readFile(filePath, 'utf8');
-    if (content.length <= maxChars) return content;
-    return `${content.slice(0, maxChars)}\n... (truncated)`;
-  } catch {
-    return null;
-  }
-};
-
-const takeLines = (text, maxLines) => {
-  const lines = text.split('\n');
-  if (lines.length <= maxLines) return text;
-  return `${lines.slice(0, maxLines).join('\n')}\n... (truncated)`;
-};
-
-const runRg = async (pattern, options = []) => {
-  try {
-    const result = await $`rg -n --no-heading -S ${options} ${pattern} ${repoPath}`;
-    return result.stdout || '';
-  } catch {
-    return '';
-  }
-};
-
-const runRgTokens = async (tokens, options = []) => {
-  const outputs = [];
-  for (const token of tokens) {
-    const out = await runRg(token, ['-F', ...options]);
-    if (out) outputs.push(out);
-  }
-  return outputs.join('\n');
-};
-
-const runRgFiles = async (globs) => {
-  try {
-    const result = await $`rg --files ${globs.map(g => ['-g', g]).flat()} ${repoPath}`;
-    return (result.stdout || '').split('\n').filter(Boolean);
-  } catch {
-    return [];
-  }
-};
-
-const gatherRepoContext = async () => {
-  const context = [];
-
-  const readmePath = path.join(repoPath, 'README.md');
-  const packagePath = path.join(repoPath, 'package.json');
-
-  const readme = await readFileLimited(readmePath, 3000);
-  if (readme) {
-    context.push(`README.md (truncated)\n${readme}`);
-  }
-
-  const pkg = await readFileLimited(packagePath, 2000);
-  if (pkg) {
-    context.push(`package.json (truncated)\n${pkg}`);
-  }
-
-  const routeMatches = await runRgTokens([
-    'app.get(',
-    'app.post(',
-    'app.put(',
-    'app.delete(',
-    'app.patch(',
-    'router.get(',
-    'router.post(',
-    'router.put(',
-    'router.delete(',
-    'router.patch(',
-    '@Get(',
-    '@Post(',
-    '@Put(',
-    '@Delete(',
-    '@Patch(',
-    'fastify.',
-    'koa-router',
-    'express(',
-    'router ='
-  ]);
-  if (routeMatches) {
-    context.push(`Route-related matches (truncated)\n${takeLines(routeMatches, MAX_ROUTE_LINES)}`);
-  }
-
-  const deleteMatches = await runRgTokens([
-    'delete(',
-    'destroy(',
-    'hardDelete',
-    'hard-delete',
-    'remove('
-  ]);
-  if (deleteMatches) {
-    context.push(`Delete-related matches (truncated)\n${takeLines(deleteMatches, MAX_MATCH_LINES)}`);
-  }
-
-  const authMatches = await runRgTokens([
-    'login',
-    'signin',
-    'auth',
-    'session',
-    'token',
-    'logout',
-    'password',
-    'mfa',
-    '2fa'
-  ]);
-  if (authMatches) {
-    context.push(`Auth-related matches (truncated)\n${takeLines(authMatches, MAX_MATCH_LINES)}`);
-  }
-
-  const openapiMatches = await runRgTokens([
-    'openapi',
-    'swagger',
-    '/api/'
-  ]);
-  if (openapiMatches) {
-    context.push(`OpenAPI/Swagger/API matches (truncated)\n${takeLines(openapiMatches, MAX_MATCH_LINES)}`);
-  }
-
-  const joined = context.join('\n\n---\n\n');
-  if (joined.length <= MAX_CONTEXT_CHARS) return joined;
-  return `${joined.slice(0, MAX_CONTEXT_CHARS)}\n... (truncated)`;
-};
-
-const normalizeOtp = (value) => {
-  if (!value) return null;
-  const trimmed = String(value).trim();
-  if (!trimmed) return null;
-  return trimmed;
-};
-
-const otpValue = normalizeOtp(otp);
-
-const repoContext = await gatherRepoContext();
-
-const extractPaths = (text) => {
-  if (!text) return [];
-  const paths = new Set();
-  const regex = /['"`](\/(?:api|rest|graphql|gql|v1|v2)[^'"`\s)]*)/gi;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    const value = match[1].trim();
-    if (value.length > 1) paths.add(value);
-  }
-  return Array.from(paths);
-};
-
-const loadOpenApiPaths = async () => {
-  const specFiles = await runRgFiles([
-    '*openapi*.yml',
-    '*openapi*.yaml',
-    '*openapi*.json',
-    '*swagger*.yml',
-    '*swagger*.yaml',
-    '*swagger*.json'
-  ]);
-
-  const selected = specFiles.slice(0, MAX_SPEC_FILES);
-  const results = [];
-
-  for (const filePath of selected) {
-    try {
-      const content = await fs.readFile(filePath, 'utf8');
-      const doc = yaml.load(content);
-      const pathsObj = doc?.paths || {};
-      for (const [p, methods] of Object.entries(pathsObj)) {
-        if (typeof p !== 'string') continue;
-        const methodList = methods && typeof methods === 'object'
-          ? Object.keys(methods).map(m => m.toUpperCase())
-          : [];
-        results.push({ path: p, methods: methodList });
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return results;
-};
-
-const parseRouteLines = (text) => {
-  if (!text) return [];
-  const routes = [];
-  const lines = text.split('\n');
-  const regex = /(app|router)\.(get|post|put|delete|patch)\(\s*['"`]([^'"`]+)['"`]/i;
-  for (const line of lines) {
-    const match = line.match(regex);
-    if (match) {
-      routes.push({
-        path: match[3],
-        methods: [match[2].toUpperCase()]
-      });
-    }
-  }
-  return routes;
-};
-
-const routeLines = await runRgTokens([
-  'app.get(',
-  'app.post(',
-  'app.put(',
-  'app.delete(',
-  'app.patch(',
-  'router.get(',
-  'router.post(',
-  'router.put(',
-  'router.delete(',
-  'router.patch('
-]);
-
-const openApiRoutes = await loadOpenApiPaths();
-const codeRoutes = parseRouteLines(routeLines);
-
-const mergeRouteSources = () => {
-  const map = new Map();
-
-  for (const route of openApiRoutes) {
-    if (!route?.path || typeof route.path !== 'string') continue;
-    const key = route.path;
-    const entry = map.get(key) || { path: key, methods: new Set(), source: new Set() };
-    (route.methods || []).forEach(m => entry.methods.add(m));
-    entry.source.add('openapi');
-    map.set(key, entry);
-  }
-
-  for (const route of codeRoutes) {
-    if (!route?.path || typeof route.path !== 'string') continue;
-    const key = route.path;
-    const entry = map.get(key) || { path: key, methods: new Set(), source: new Set() };
-    (route.methods || []).forEach(m => entry.methods.add(m));
-    entry.source.add('code');
-    map.set(key, entry);
-  }
-
-  for (const p of extractPaths(repoContext)) {
-    const entry = map.get(p) || { path: p, methods: new Set(), source: new Set() };
-    entry.source.add('context');
-    map.set(p, entry);
-  }
-
-  return Array.from(map.values()).map(entry => ({
-    path: entry.path,
-    methods: Array.from(entry.methods),
-    source: Array.from(entry.source)
-  }));
-};
-
-const routeCandidates = mergeRouteSources();
-
-const KEYWORDS = [
-  { key: 'auth', score: 5, description: 'Authentication and session endpoints' },
-  { key: 'login', score: 5, description: 'Authentication and session endpoints' },
-  { key: 'token', score: 4, description: 'Token and session handling' },
-  { key: 'user', score: 4, description: 'User and permission related APIs' },
-  { key: 'admin', score: 4, description: 'Admin and privileged endpoints' },
-  { key: 'role', score: 3, description: 'Role and permission management' },
-  { key: 'payment', score: 4, description: 'Payment and billing flows' },
-  { key: 'card', score: 4, description: 'Payment and card management' },
-  { key: 'billing', score: 3, description: 'Payment and billing flows' },
-  { key: 'order', score: 3, description: 'Order and checkout flows' },
-  { key: 'checkout', score: 3, description: 'Order and checkout flows' },
-  { key: 'cart', score: 3, description: 'Cart and basket operations' },
-  { key: 'basket', score: 3, description: 'Cart and basket operations' },
-  { key: 'search', score: 3, description: 'Search and query endpoints' },
-  { key: 'query', score: 2, description: 'Search and query endpoints' },
-  { key: 'report', score: 2, description: 'Reporting and export endpoints' },
-  { key: 'upload', score: 3, description: 'File upload endpoints' },
-  { key: 'file', score: 2, description: 'File and media endpoints' }
-];
-
-const scoreFocusPath = (pathValue) => {
-  let score = 0;
-  const lower = pathValue.toLowerCase();
-  for (const rule of KEYWORDS) {
-    if (lower.includes(`/${rule.key}`) || lower.includes(rule.key)) {
-      score += rule.score;
-    }
-  }
-  if (lower.includes('/api/')) score += 1;
-  if (lower.includes('/rest/')) score += 1;
-  return score;
-};
-
-const describePath = (pathValue) => {
-  const lower = pathValue.toLowerCase();
-  for (const rule of KEYWORDS) {
-    if (lower.includes(`/${rule.key}`) || lower.includes(rule.key)) {
-      return rule.description;
-    }
-  }
-  return `Focus on ${pathValue}`;
-};
-
-const buildFallbackFocus = (paths) => {
-  return paths
-    .map(p => ({ path: p, score: scoreFocusPath(p) }))
-    .sort((a, b) => b.score - a.score)
-    .filter(entry => entry.score > 0)
-    .slice(0, MAX_RULES)
-    .map(entry => ({
-      description: describePath(entry.path),
-      type: 'path',
-      url_path: entry.path
-    }));
-};
-
-const buildFallbackAvoid = (paths) => {
-  const unique = Array.from(new Set(paths));
-  return unique.slice(0, MAX_RULES).map(p => ({
-    description: 'Avoid destructive delete operation',
-    type: 'path',
-    url_path: p
-  }));
-};
-
-const client = new OpenAI({
-  apiKey: envConfig.llm.vllm.apiKey,
-  baseURL: envConfig.llm.vllm.baseURL
-});
-
-const systemPrompt = [
-  'You generate a DokodemoDoor profile config.',
-  'Return YAML only (no code fences).',
-  'Include only: authentication, rules.',
-  'Use provided credentials exactly.',
-  'Login flow and success_condition are fixed by the caller; do not invent alternatives.',
-  'Prioritize OpenAPI/Swagger paths, then code routes, then README hints.',
-  'Focus rules should include descriptions plus path patterns (url_path).',
-  'Avoid rules should include destructive endpoints and logout/static paths when found.',
-  'For each focus rule description, write a concise but comprehensive sentence that explains what the endpoint is, how it fits into the application structure, and how it should behave under normal usage.',
-  'Think like a solution architect and a security engineer preparing background for black-box testing.',
-  'Mention authentication or role expectations when strongly implied by the path/context; avoid speculation.',
-  'Keep output concise, but make descriptions meaningful (prefer 2-3 sentences over fragments).'
-].join(' ');
-
-const userPrompt = [
-  `Repository path: ${repoPath}`,
-  `Login URL: ${loginUrl}`,
-  `Credentials: username=${username}, password=${password}${otpValue ? `, totp_code=${otpValue}` : ''}`,
-  `Route candidates (paths/methods): ${JSON.stringify(routeCandidates.slice(0, 50))}`,
-  '',
-  'Repository context:',
-  repoContext || '(no context extracted)'
-].join('\n');
-
-const requestLLM = async (prompt, user) => {
-  return client.chat.completions.create({
-    model: envConfig.llm.vllm.model,
-    temperature: 0.2,
-    max_tokens: 1200,
-    response_format: { type: 'text' },
-    messages: [
-      { role: 'system', content: prompt },
-      { role: 'user', content: user }
-    ]
-  });
-};
-
-let response = await requestLLM(systemPrompt, userPrompt);
-let content = response.choices?.[0]?.message?.content?.trim()
-  || response.choices?.[0]?.text?.trim();
-
-if (!content) {
-  const shortContext = repoContext ? `${repoContext.slice(0, 3000)}\n... (truncated)` : '(no context extracted)';
-  const retryUserPrompt = [
-    `Repository path: ${repoPath}`,
-    `Login URL: ${loginUrl}`,
-    `Credentials: username=${username}, password=${password}${otpValue ? `, totp_code=${otpValue}` : ''}`,
-    '',
-    'Repository context:',
-    shortContext
-  ].join('\n');
-  const retrySystemPrompt = [
-    'Return only YAML in the assistant content (no reasoning).',
-    'Include only: authentication, rules.',
-    'Use provided credentials exactly.',
-    'Login flow and success_condition are fixed by the caller; do not invent alternatives.',
-    'Focus rules should include descriptions plus path patterns (url_path).',
-    'Avoid rules should include destructive endpoints (DELETE, hard-delete, admin deletes) when found.',
-    'For each focus rule description, write a concise but comprehensive sentence that explains what the endpoint is, how it fits into the application structure, and how it should behave under normal usage.',
-    'Think like a solution architect and a security engineer preparing background for black-box testing.',
-    'Mention authentication or role expectations when strongly implied by the path/context; avoid speculation.',
-    'Keep output concise, but make descriptions meaningful (prefer 2-3 sentences over fragments).'
-  ].join(' ');
-
-  response = await requestLLM(retrySystemPrompt, retryUserPrompt);
-  content = response.choices?.[0]?.message?.content?.trim()
-    || response.choices?.[0]?.text?.trim();
-}
-
-if (!content) {
-  console.error('No content returned from LLM.');
-  console.error(`Raw choice: ${JSON.stringify(response.choices?.[0] || {}, null, 2)}`);
-  process.exit(1);
-}
-
-const stripCodeFences = (text) => {
-  const trimmed = text.trim();
-  if (trimmed.startsWith('```')) {
-    return trimmed.replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim();
-  }
-  return trimmed;
-};
-
-const cleanedContent = stripCodeFences(content);
-
-let parsed;
-try {
-  parsed = yaml.load(cleanedContent);
-} catch (err) {
-  console.error(`Generated YAML is invalid: ${err.message}`);
-  process.exit(1);
-}
-
-if (!parsed || typeof parsed !== 'object') {
-  console.error('Generated YAML did not produce a valid object.');
-  process.exit(1);
-}
 
 const authentication = {
   login_type: 'form',
@@ -479,111 +51,273 @@ const authentication = {
     password,
     ...(otpValue ? { totp_code: otpValue } : {})
   },
-  login_flow: buildDefaultLoginFlow(loginUrl, username, password),
-  success_condition: DEFAULT_SUCCESS_CONDITION
+  login_flow: buildDefaultLoginFlow(loginUrl, username, password, otpValue),
+  success_condition: { type: 'url_contains', value: '/#/search' }
 };
 
-const normalizeRule = (rule, fallbackDescription) => {
+// --- Utilities ---
+const runRg = async (pattern, options = []) => {
+  try {
+    const result = await $`rg -n --no-heading -S ${options} ${pattern} ${repoPath}`;
+    return result.stdout || '';
+  } catch { return ''; }
+};
+
+const runRgTokens = async (tokens, maxLines = 80) => {
+  const outputs = [];
+  for (const token of tokens) {
+    const out = await runRg(token, ['-F']);
+    if (out) outputs.push(out);
+  }
+  const full = outputs.join('\n');
+  const lines = full.split('\n');
+  return lines.length > maxLines ? lines.slice(0, maxLines).join('\n') + '\n... (truncated)' : full;
+};
+
+const runSemgrep = async (pattern, lang = 'javascript') => {
+  try {
+    const result = await $`semgrep --quiet --json --lang ${lang} -e ${pattern} ${repoPath}`;
+    const data = JSON.parse(result.stdout);
+    return data.results || [];
+  } catch { return []; }
+};
+
+const gatherRepoContext = async () => {
+  const context = [];
+  try {
+    const manifests = ['package.json', 'README.md', 'requirements.txt', 'pom.xml', 'go.mod', 'Gemfile', 'Docker-compose.yml'];
+    for (const f of manifests) {
+      const p = path.join(repoPath, f);
+      const c = await fs.readFile(p, 'utf8').catch(() => null);
+      if (c) context.push(`${f}:\n${c.slice(0, 1500)}`);
+    }
+
+    // High-level architecture hints via common patterns
+    const architecturalTriggers = [
+      'module.exports', '@Component', '@Controller', '@RestController', // JS/TS & Java
+      'def ', 'class ', // Python/Ruby
+      'func ', 'package ' // Go
+    ];
+    const matches = await runRgTokens(architecturalTriggers, 100);
+    if (matches) context.push(`Architecture Clues (Selected Code):\n${matches}`);
+
+    // Cross-language Security Points via Semgrep
+    const securityPatterns = [
+      'jwt.verify(...)', 'session', 'cookie',
+      'db.query(...)', 'SELECT ... FROM', 'INSERT INTO', // DB logic
+      'fs.readFile(...)', 'open(...)', // File logic
+      'permission', 'authorize', 'role' // Auth logic
+    ];
+    const securityPoints = await runSemgrep(securityPatterns.join(' || '));
+    if (securityPoints.length > 0) {
+      const snippets = securityPoints.slice(0, 15).map(r => `File: ${r.path}\nLines: ${r.extra.lines}`).join('\n\n');
+      context.push(`Security-Sensitive Logic Found (Semgrep):\n${snippets}`);
+    }
+  } catch (e) {
+    console.warn('Context gathering partially failed');
+  }
+  return context.join('\n\n---\n\n').slice(0, MAX_CONTEXT_CHARS);
+};
+
+const loadOpenApiPaths = async () => {
+  try {
+    const result = await $`rg --files -g "*openapi*.{yml,yaml,json}" -g "*swagger*.{yml,yaml,json}" ${repoPath}`;
+    const files = result.stdout.split('\n').filter(Boolean).slice(0, MAX_SPEC_FILES);
+    const paths = [];
+    for (const f of files) {
+      const content = await fs.readFile(f, 'utf8');
+      const doc = yaml.load(content);
+      if (doc?.paths) {
+        for (const [p, methods] of Object.entries(doc.paths)) {
+          paths.push({ path: p, methods: Object.keys(methods).map(m => m.toUpperCase()) });
+        }
+      }
+    }
+    return paths;
+  } catch { return []; }
+};
+
+const parseCodeRoutes = async () => {
+  const routes = [];
+
+  const frameworks = [
+    { name: 'Express/JS', pattern: 'app.$METHOD($PATH, ...)', lang: 'javascript' },
+    { name: 'Flask/Python', pattern: '@app.route($PATH, methods=[$METHOD])', lang: 'python' },
+    { name: 'Django/Python', pattern: 'path($PATH, ...)', lang: 'python' },
+    { name: 'Spring/Java', pattern: '@$REQ_MAPPING($PATH)', lang: 'java' },
+    { name: 'Gin/Go', pattern: '$ENGINE.$METHOD($PATH, ...)', lang: 'go' }
+  ];
+
+  for (const fw of frameworks) {
+    const pattern = fw.pattern || '$OBJ.$METHOD($PATH, ...)';
+    const fwMatches = await runSemgrep(pattern, fw.lang);
+    fwMatches.forEach(m => {
+      const pathValue = m.extra?.metavars?.['$PATH']?.abstract_content;
+      if (pathValue && typeof pathValue === 'string' && pathValue.startsWith('/')) {
+        routes.push({ path: pathValue.replace(/['"`]/g, '').split('?')[0], methods: ['API'] });
+      }
+    });
+  }
+
+  // Fallback broad regex for path patterns
+  const text = await runRgTokens(['/', '"/', "'/"], 300);
+  const regex = /['"`](\/(?:api|rest|v[0-9]|auth|user|admin|order|product|file|upload|profile|metrics|snippets|gql)[^'"`\s?)]*)/gi;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    routes.push({ path: m[1], methods: ['SCAN'] });
+  }
+  return routes;
+};
+
+// --- Core Mapping ---
+const buildRouteTree = (routes) => {
+  const tree = {};
+  for (const r of routes) {
+    const parts = r.path.split('/').filter(Boolean);
+    let curr = tree;
+    for (let i = 0; i < Math.min(parts.length, 3); i++) {
+      if (!curr[parts[i]]) curr[parts[i]] = {};
+      curr = curr[parts[i]];
+    }
+  }
+  return tree;
+};
+
+const normalizeRule = (rule, fallback) => {
   if (!rule || typeof rule !== 'object') return null;
-  const description = (rule.description || fallbackDescription || '').trim();
-  const urlPath = String(rule.url_path || rule.urlPath || '').trim();
-  let type = (rule.type || '').toString().trim().toLowerCase();
-
-  if (!type && rule.method) {
-    type = 'method';
-  }
-
-  if (!type) {
-    type = urlPath.startsWith('/') ? 'path' : 'path';
-  }
-
-  const methodCandidate = String(rule.method || urlPath || '').trim().toUpperCase();
-  const isHttpMethod = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'].includes(methodCandidate);
-  if (!rule.type && isHttpMethod) {
-    type = 'method';
-  }
-
-  const finalUrlPath = type === 'method'
-    ? methodCandidate
-    : urlPath;
-
-  if (!description || !finalUrlPath) return null;
-
+  const urlPath = (rule.url_path || rule.urlPath || '').trim();
+  const description = (rule.description || fallback || '').trim();
+  if (!urlPath || !description) return null;
   return {
     description,
-    type,
-    url_path: finalUrlPath
+    type: 'path',
+    url_path: urlPath.startsWith('/') ? urlPath : '/' + urlPath
   };
 };
 
-const rawRules = parsed.rules || { avoid: [], focus: [] };
-const rawAvoid = Array.isArray(rawRules.avoid) ? rawRules.avoid : [];
-const rawFocus = Array.isArray(rawRules.focus) ? rawRules.focus : [];
+// --- Main Execution ---
+async function main() {
+  console.log(`🔍 Analyzing repository: ${repoPath}...`);
 
-const rules = {
-  avoid: rawAvoid
-    .map(rule => normalizeRule(rule, 'Avoid risky operation'))
-    .filter(Boolean)
-    .filter(rule => rule.type === 'path'),
-  focus: rawFocus
-    .map(rule => normalizeRule(rule, 'Focus area'))
-    .filter(Boolean)
-};
+  const repoContext = await gatherRepoContext();
+  const openApiRoutes = await loadOpenApiPaths();
+  const codeRoutes = await parseCodeRoutes();
 
-const allPaths = routeCandidates.map(c => c.path);
-const deletePaths = allPaths.filter(p => /delete|destroy|remove/.test(p.toLowerCase()));
-const logoutPaths = allPaths.filter(p => /logout|signout|sign-out|sign_out/.test(p.toLowerCase()));
-const staticPaths = allPaths.filter(p => /\/assets|\/static|\/public|\/build|\/dist|\/favicon/.test(p.toLowerCase()));
+  // Merge sources
+  const routeMap = new Map();
+  [...openApiRoutes, ...codeRoutes].forEach(r => {
+    if (!routeMap.has(r.path)) routeMap.set(r.path, { path: r.path, methods: new Set() });
+    r.methods.forEach(m => routeMap.get(r.path).methods.add(m));
+  });
 
-if (rules.avoid.length === 0) {
-  const avoidFallback = [
-    ...logoutPaths.map(p => ({ description: 'Avoid logout endpoints', type: 'path', url_path: p })),
-    ...staticPaths.map(p => ({ description: 'Avoid static assets', type: 'path', url_path: p }))
-  ];
-  if (avoidFallback.length === 0) {
-    avoidFallback.push({
-      description: 'Avoid static assets and logout endpoints',
-      type: 'path',
-      url_path: '/assets/*'
-    });
-    avoidFallback.push({
-      description: 'Avoid static assets and logout endpoints',
-      type: 'path',
-      url_path: '/static/*'
-    });
-    avoidFallback.push({
-      description: 'Avoid static assets and logout endpoints',
-      type: 'path',
-      url_path: '/logout*'
-    });
+  const allRoutes = Array.from(routeMap.values()).map(r => ({ ...r, methods: Array.from(r.methods) }));
+  const routeTree = buildRouteTree(allRoutes);
+
+  // LLM Logic
+  const client = new OpenAI({ apiKey: envConfig.llm.vllm.apiKey, baseURL: envConfig.llm.vllm.baseURL });
+
+  const systemPrompt = [
+    'Role: Senior Security Architect & YAML Generator.',
+    'TASK: Return ONLY a YAML object with a "rules" key containing "focus" and "avoid" lists.',
+    'INSTRUCTION: Identify 5-10 logical architectural groups (e.g., /api/user/*, /rest/admin/*) based on the provided data.',
+    '1. Each group MUST have a tech-heavy 2-3 sentence description of security risks.',
+    '2. Use simple * wildcards in "url_path". Do NOT use "|" or regex pipes.',
+    '3. Do NOT hallucinate. Use ONLY provided routes.',
+    '4. Output ONLY the YAML. No conversational text.',
+    'Format Example:',
+    'rules:',
+    '  focus:',
+    '    - url_path: "/api/v1/*"',
+    '      description: "Detailed security analysis..."',
+    '  avoid: []'
+  ].join('\n');
+
+  const userPrompt = [
+    `Project: ${path.basename(repoPath)}`,
+    `Structural Route Tree (High Level):\n${JSON.stringify(routeTree, null, 2)}`,
+    `Detailed Sample Routes (Top 50):\n${JSON.stringify(allRoutes.slice(0, 50), null, 2)}`,
+    `Repo Context:\n${repoContext}`
+  ].join('\n\n');
+
+  console.log('🤖 Requesting AI analysis...');
+  const response = await client.chat.completions.create({
+    model: envConfig.llm.vllm.model,
+    temperature: 0,
+    max_tokens: 4000,
+    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }]
+  });
+
+  const content = response.choices?.[0]?.message?.content?.trim() || response.choices?.[0]?.text?.trim() || '';
+
+  const extractYaml = (text) => {
+    // Try to find content between triple backticks
+    const match = text.match(/```(?:yaml)?\s*([\s\S]*?)```/);
+    if (match) return match[1].trim();
+
+    // Otherwise, try to find the start of the 'rules:' key
+    const rulesIdx = text.indexOf('rules:');
+    if (rulesIdx !== -1) return text.slice(rulesIdx).trim();
+
+    return text.trim();
+  };
+
+  const cleanedContent = extractYaml(content);
+  console.log('--- EXTRACTED YAML ---');
+  console.log(cleanedContent);
+  console.log('---------------------');
+
+  let parsed = {};
+  try {
+    parsed = yaml.load(cleanedContent) || {};
+  } catch (e) {
+    console.error(`❌ YAML Parsing Error: ${e.message}`);
+    // If it fails, maybe it's just the content without the top-level 'rules:' key
+    try {
+      const wrapped = `rules:\n${cleanedContent.split('\n').map(l => '  ' + l).join('\n')}`;
+      parsed = yaml.load(wrapped) || {};
+      console.log('💡 Recovered by wrapping in "rules:" key');
+    } catch (e2) {
+      console.error('❌ Recovery failed. Using fallback.');
+    }
   }
-  rules.avoid = avoidFallback;
+
+  const rawRules = parsed.rules || (parsed.focus ? parsed : { focus: [], avoid: [] });
+  const rules = {
+    focus: (rawRules.focus || []).map(r => normalizeRule(r, 'Focus area')).filter(Boolean),
+    avoid: (rawRules.avoid || []).map(r => normalizeRule(r, 'Avoid area')).filter(Boolean)
+  };
+
+  // Fallback if AI fails
+  if (rules.focus.length === 0) {
+    console.warn('⚠️ AI analysis failed. Using fallback grouping.');
+    const prefixes = new Set(allRoutes.map(r => r.path.split('/').slice(0, 3).join('/') + '/*'));
+    rules.focus = Array.from(prefixes).slice(0, MAX_RULES).map(p => ({
+      description: `[Fallback] Group around ${p}.`,
+      type: 'path',
+      url_path: p
+    }));
+  }
+
+  if (rules.avoid.length === 0) {
+    rules.avoid = [
+      { description: 'Static assets', type: 'path', url_path: '/static/*' },
+      { description: 'Logout endpoints', type: 'path', url_path: '/logout*' }
+    ];
+  }
+
+  const output = yaml.dump({ authentication, rules: {
+    focus: rules.focus.slice(0, MAX_RULES),
+    avoid: rules.avoid.slice(0, MAX_RULES)
+  }}, { lineWidth: -1, quotingType: '"', forceQuotes: true });
+
+  const outputPath = path.join(path.dirname(fileURLToPath(import.meta.url)), `../configs/profile/${path.basename(repoPath)}.yaml`);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, output, 'utf8');
+
+  console.log(`✅ Generated ${outputPath}`);
 }
 
-if (rules.focus.length === 0 || rules.focus.every(rule => rule.type === 'method')) {
-  const focusFallback = buildFallbackFocus(allPaths);
-  rules.focus = focusFallback.length ? focusFallback : rules.focus;
-}
-
-rules.avoid = rules.avoid.slice(0, MAX_RULES);
-rules.focus = rules.focus.slice(0, MAX_RULES);
-
-const finalConfig = {
-  authentication,
-  rules
-};
-
-const output = yaml.dump(finalConfig, {
-  lineWidth: -1,
-  noRefs: true,
-  quotingType: '"',
-  forceQuotes: true
+main().catch(err => {
+  console.error('Fatal Error:', err);
+  process.exit(1);
 });
-const repoName = path.basename(repoPath);
-const outputPath = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  `../configs/${repoName}-profile.yaml`
-);
-await fs.writeFile(outputPath, output, 'utf8');
-
-console.log(`✅ Generated ${path.resolve(outputPath)}`);

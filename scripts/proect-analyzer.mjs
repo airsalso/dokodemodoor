@@ -243,8 +243,10 @@ const stripCodeFences = (text) => {
 const cleanedContent = stripCodeFences(content);
 
 const repoBase = path.basename(repoPath);
-const outputPath = path.resolve('configs', `${repoBase}-analyze.txt`);
+const outputDir = path.resolve('analyzer', 'result');
+const outputPath = path.join(outputDir, `${repoBase}-analyze.txt`);
 
+await fs.mkdir(outputDir, { recursive: true });
 await fs.writeFile(outputPath, `${cleanedContent}\n`, 'utf8');
 
 console.log(`Saved analysis to ${outputPath}`);
