@@ -29,7 +29,13 @@ import { generateAuditPath } from './audit/utils.js';
  * - None (pure computation).
  */
 export const generateSessionLogPath = (webUrl, sessionId) => {
-  const hostname = new URL(webUrl).hostname.replace(/[^a-zA-Z0-9-]/g, '-');
+  let hostname = 'unknown';
+  try {
+    const url = (webUrl && webUrl.includes('://')) ? webUrl : `http://${webUrl || 'localhost'}`;
+    hostname = new URL(url).hostname.replace(/[^a-zA-Z0-9-]/g, '-');
+  } catch (e) {
+    // Fallback if URL parsing fails
+  }
   const sessionFolderName = `${hostname}_${sessionId}`;
   return path.join(process.cwd(), 'audit-logs', sessionFolderName);
 };
@@ -714,7 +720,12 @@ export const selectSession = async () => {
     const statusColor = status === 'completed' ? chalk.green : chalk.blue;
     const statusIcon = status === 'completed' ? '✅' : '🔄';
 
-    console.log(statusColor(`${index + 1}) ${new URL(session.webUrl).hostname} + ${path.basename(session.repoPath)} [${status}]`));
+    let hostname = 'unknown';
+    try {
+      const url = (session.webUrl && session.webUrl.includes('://')) ? session.webUrl : `http://${session.webUrl || 'localhost'}`;
+      hostname = new URL(url).hostname;
+    } catch (e) {}
+    console.log(statusColor(`${index + 1}) ${hostname} + ${path.basename(session.repoPath)} [${status}]`));
     console.log(chalk.gray(`   Last activity: ${timeAgo}, Completed: ${completedCount}/${totalAgents} agents`));
     console.log(chalk.gray(`   Session ID: ${session.id}`));
 

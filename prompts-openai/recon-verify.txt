@@ -16,6 +16,16 @@ The final `deliverables/recon_verify_deliverable.md` will be the ONLY verificati
 
 ---
 
+## 1.1) PRE-CALCULATED SECURITY CONTEXT
+{{SECURITY_CONTEXT}}
+
+**Synergy Note:**
+- **OSV & Semgrep verification**: The pre-calculated context above contains likely vulnerable spots discovered by static tools. Your first priority is to reconcile these with the `recon_deliverable.md`.
+- **Logic Validation**: Do not just check for existence; check for **reachability** and **logic flow**. If Semgrep found a sink, you must find the network-reachable source that flows into it.
+- **AI Override**: If your code analysis contradicts a tool finding, TRUST YOUR ANALYSIS but explicitly note why the tool might have been wrong (e.g., "False positive in Semgrep, input is actually sanitized at line X").
+
+---
+
 ## 2) OBJECTIVE
 
 1. **FIRST ACTION: LOAD & ANCHOR**:

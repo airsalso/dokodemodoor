@@ -57,11 +57,19 @@ Your mission is to enrich the current **Application Security Map** by performing
   - Capture both successful and failed test results
 
 ## 6.1 COMMAND FORMATTING (MANDATORY & CRITICAL)
-- When calling `bash` or `run_command`, the `command`/`CommandLine` must be a **plain shell string**.
-- ❌ **FATAL ERROR**: Do NOT wrap it in JSON. Do NOT include a `"timeout"` key.
-- ✅ **Correct**: `{"command": "schemathesis run ..."}`
-- ❌ **INCORRECT (Shell will fail)**: `{"command": "{\"command\": \"schemathesis run ...\", \"timeout\": 60000}"}`
-- **Failing here will break the entire fuzzer run.** Your command MUST start with the tool name (e.g., `schemathesis`, `curl`), **NEVER** a curly bracket `{`.
+- When calling `run_command`, the `CommandLine` argument must be a **plain shell string**.
+- ❌ **FATAL ERROR**: Do NOT wrap the command string in another JSON layer.
+- ✅ **Correct Tool Call**:
+  ```json
+  {
+    "CommandLine": "schemathesis run <URL> --checks all",
+    "Cwd": "/home/ubuntu/repo",
+    "SafeToAutoRun": true
+  }
+  ```
+- ❌ **INCORRECT (Fails bash execution)**:
+  `{"CommandLine": "{\"command\": \"schemathesis ...\"}"}`
+- **Failing here will break the entire fuzzer run.** Your `CommandLine` must start with the tool name (e.g., `schemathesis`, `curl`), **NEVER** an opening curly bracket `{`.
 - **Impact Analysis**:
   - Analyze responses in the **5xx (Server Error)** range or unexpected **4xx** behaviors
   - Proactively investigate the source code handling these failed requests to identify the root cause

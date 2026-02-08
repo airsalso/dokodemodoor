@@ -2,8 +2,14 @@
 
 You MUST save all exploitation evidence as a **JSON object** using the `save_deliverable` tool with the appropriate `*_EVIDENCE` type. This enables automated verification and reporting.
 
+**CRITICAL: REQUIRED FIELDS (Validation will FAIL if missing):**
+- `vulnerability_id`: Must match the ID from your queue (e.g., `SQLI-VULN-01`).
+- `verdict`: MUST be exactly one of: `EXPLOITED`, `BLOCKED_BY_SECURITY`, or `POTENTIAL`.
+- `evidence`: An array of evidence items.
+- `reproduction_steps`: An array of strings explaining how to reproduce the vuln.
+
 **JSON Schema Requirements:**
-The top-level object must contain a `vulnerabilities` array, even if there is only one finding.
+The top-level object must contain a `vulnerabilities` array.
 
 ```json
 {
@@ -57,3 +63,4 @@ The top-level object must contain a `vulnerabilities` array, even if there is on
 3. **Sensitive data**: Mask passwords/codes with `[REDACTED]`.
 4. **Tooling**: Use `TaskAgent` to automate evidence collection where possible.
 5. **Screenshots**: If you use Playwright, ALWAYS take a screenshot of the final success state and include it in the JSON.
+6. **If a required tool is unavailable**: Explain the limitation in `impact_summary` and add a reproduction step describing the constraint. Do **NOT** invent new evidence types.

@@ -21,7 +21,8 @@ export class McpProxy {
   }
 
   async ensureStarted() {
-    if (this.initializationPromise) return this.initializationPromise;
+    // Only return existing promise if it exists AND the process is still alive
+    if (this.initializationPromise && this.process) return this.initializationPromise;
 
     this.initializationPromise = this._start();
     return this.initializationPromise;
@@ -80,6 +81,19 @@ export class McpProxy {
     this.process.on('exit', (code) => {
       console.log(chalk.yellow(`    ⚠️  MCP server ${this.name} exited with code ${code}`));
       this.process = null;
+      this.isInitialized = false;
+      this.initializationPromise = null;
+
+      // Reject all pending requests
+      for (const [id, handler] of this.pendingRequests.entries()) {
+        handler.reject(new Error(`MCP server ${this.name} exited unexpectedly with code ${code}`));
+      }
+      this.pendingRequests.clear();
+
+      if (this.rl) {
+        try { this.rl.close(); } catch (e) {}
+        this.rl = null;
+      }
     });
 
     // Initialize MCP (Protocol version handshake)

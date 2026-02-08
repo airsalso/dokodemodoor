@@ -415,7 +415,10 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
   }
 
   // PHASE 7: OSV ANALYSIS
-  if (startPhase <= 7) {
+  // You can enable/disable this via DOKODEMODOOR_SKIP_OSV_SCAN in .env (default: true)
+  const isOsvEnabled = process.env.DOKODEMODOOR_SKIP_OSV_SCAN !== 'true';
+
+  if (startPhase <= 7 && isOsvEnabled) {
     console.log(chalk.cyan.bold('\n🔍 PHASE 7: OPEN SOURCE VULNERABILITY ANALYSIS'));
     const osvTimer = new Timer('phase-7-osv-analysis');
 

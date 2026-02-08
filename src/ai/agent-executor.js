@@ -132,6 +132,8 @@ function agentNameToPromptName(agentName) {
     }
   }
 
+  if (agentName === 'osv-analysis') return 'osv-analysis';
+
   // Default: return as-is
   return agentName;
 }
@@ -171,6 +173,11 @@ function getAgentPhase(agentName) {
   // Phase 5: Reporting
   if (agentName === 'report') {
     return 'reporting';
+  }
+
+  // SCA: OSV Analysis
+  if (agentName === 'osv-analysis') {
+    return 'osv-analysis';
   }
 
   // Unknown agent

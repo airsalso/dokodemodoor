@@ -16,6 +16,8 @@ import { toolRegistry } from '../../../src/ai/tools/tool-registry.js';
 import { config } from '../../../src/config/env.js';
 import { getAgentName, getTargetDir, getWebUrl } from '../../../src/utils/context.js';
 import chalk from 'chalk';
+import path from 'node:path';
+import fs from 'node:fs';
 
 export const TaskAgentInputSchema = z.object({
   task: z.string().describe('Name/description of the specialized agent to create'),
@@ -27,7 +29,8 @@ export const TaskAgentInputSchema = z.object({
  * Allows executing shell commands in the target directory
  */
 export const BashToolSchema = z.object({
-  command: z.string().describe('The bash command to execute')
+  command: z.string().describe('The bash command to execute'),
+  cwd: z.string().optional().describe('The working directory relative to the project root')
 });
 
 /**
@@ -66,6 +69,16 @@ export async function executeBash(params) {
       }
     }
 
+    // Defensive: Strip LLM hallucinations like "command: ls" or "bash: ls" or "{command: ls}"
+    if (typeof safeCommand === 'string') {
+      let cleaned = safeCommand.trim();
+      // Handle unquoted pseudo-JSON like "{command: curl ...}"
+      cleaned = cleaned.replace(/^\{\s*(command|bash|sh|sh -c)\s*:\s*/i, '');
+      cleaned = cleaned.replace(/^(command|bash|sh|sh -c)\s*:\s*/i, '');
+      cleaned = cleaned.replace(/\}\s*$/, '');
+      safeCommand = cleaned.trim();
+    }
+
     if (!safeCommand || typeof safeCommand !== 'string') {
       throw new Error('Missing bash command');
     }
@@ -100,8 +113,11 @@ export async function executeBash(params) {
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
 
+    // Resolve working directory: if params.cwd is provided, resolve against targetDir
+    const workDir = params.cwd ? path.resolve(targetDir, params.cwd) : targetDir;
+
     const { stdout, stderr } = await execAsync(safeCommand, {
-      cwd: targetDir,
+      cwd: workDir,
       shell: '/bin/bash',
       maxBuffer: 1024 * 1024 * 10, // 10MB buffer
       timeout: timeoutSeconds * 1000, // Timeout in milliseconds
@@ -234,7 +250,7 @@ function registerSubAgentTools() {
   );
 
   // Common aliases that LLMs might use based on their training
-  const bashAliases = ['grep', 'search_file', 'open_file', 'read_file', 'ls', 'find', 'list_files', 'rg'];
+  const bashAliases = ['run_command', 'grep', 'search_file', 'open_file', 'read_file', 'ls', 'find', 'list_files', 'rg'];
   for (const alias of bashAliases) {
     subAgentRegistry.register(
       alias,
@@ -243,6 +259,7 @@ function registerSubAgentTools() {
         command: z.string().optional(),
         path: z.string().optional(),
         query: z.string().optional(),
+        cwd: z.string().optional(),
         line_start: z.coerce.number().optional(),
         line_end: z.coerce.number().optional(),
         max_results: z.coerce.number().optional()
@@ -270,12 +287,10 @@ function registerSubAgentTools() {
         // Path normalization: Safe guarding against LLM omitting leading slash on absolute paths.
         if (p.path) {
           const targetDir = getTargetDir();
-          const fs = await import('node:fs');
-          const pathMod = await import('node:path');
 
           // Resolve relative paths against repo root
-          if (!pathMod.isAbsolute(p.path)) {
-            const absCandidate = pathMod.resolve(targetDir, p.path);
+          if (!path.isAbsolute(p.path)) {
+            const absCandidate = path.resolve(targetDir, p.path);
             if (fs.existsSync(absCandidate)) {
               p.path = absCandidate;
               console.log(chalk.gray(`      🔧 Auto-resolved path: ${p.path}`));
@@ -286,8 +301,9 @@ function registerSubAgentTools() {
           if (!fs.existsSync(p.path)) {
             try {
               const { execSync } = await import('child_process');
-              const base = pathMod.basename(p.path);
-              const cmd = `rg --files -g '*${base}*' ${shQuote(targetDir)} | head -n 1`;
+              const base = path.basename(p.path);
+              // Prioritize exact filename match in any subdirectory
+              const cmd = `rg --files -g '**/${base}' ${shQuote(targetDir)} | head -n 1`;
               const match = execSync(cmd, { encoding: 'utf8' }).trim();
               if (match) {
                 p.path = match;
@@ -320,7 +336,7 @@ function registerSubAgentTools() {
               cmd = `cat ${shQuote(p.path)}`;
             }
           }
-        } else if (alias === 'grep' || alias === 'search_file') {
+        } else if (alias === 'grep' || alias === 'search_file' || alias === 'rg') {
           if (p.query) {
             const max = p.max_results || 100;
             const targetPath = p.path || '.';
@@ -358,9 +374,9 @@ function registerSubAgentTools() {
           const firstWord = cmd.trim().split(/\s+/)[0];
 
           if (commonTools.includes(firstWord)) {
-            const escapedPath = p.path.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+            const escapedPath = p.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             // Support matching path even if it is quoted
-            const pathRegex = new RegExp(`(^|\\s)[\\"']?${escapedPath}[\\"']?(\\s|$)`);
+            const pathRegex = new RegExp(`(^|\\s)["']?${escapedPath}["']?(\\s|$)`);
 
             if (!pathRegex.test(cmd)) {
               cmd = `${cmd.trim()} ${p.path}`;
@@ -370,10 +386,11 @@ function registerSubAgentTools() {
         }
 
         if (!cmd) return { status: 'error', message: 'Missing command or path' };
-        return executeBash({ command: cmd });
+        return executeBash({ command: cmd, cwd: p.cwd });
       }
     );
   }
+
 
 // CRITICAL: Sub-agents should NEVER save deliverables as it causes premature phase termination
   // We removed save_deliverable from sub-agent tools to avoid confusing the LLM and generating blocked messages.

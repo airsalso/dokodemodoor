@@ -9,7 +9,7 @@
     "clean": "rm -rf audit-logs/* sessions/* deliverables/* repos/* .dokodemodoor-store.json",
     "build": "npm install && cd mcp-server && npm install",
     "generate-project-profile": "node scripts/generate-project-profile.mjs",
-    "project-analyzer": "node scripts/proect-analyzer.mjs"
+    "project-analyzer": "node scripts/project-analyzer.mjs"
   },
   "dependencies": {
     "ajv": "^8.12.0",

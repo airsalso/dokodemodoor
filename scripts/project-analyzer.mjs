@@ -14,7 +14,7 @@ const MAX_SPEC_FILES = 6;
 const [repoPathArg] = process.argv.slice(2);
 
 if (!repoPathArg) {
-  console.error('Usage: node scripts/proect-analyzer.mjs <project_path>');
+  console.error('Usage: node scripts/project-analyzer.mjs <project_path>');
   process.exit(1);
 }
 

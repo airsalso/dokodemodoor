@@ -11,6 +11,11 @@ If a file reading tool (e.g., `open_file` or `view_file`) fails with "No such fi
    - Tool: Use your search or shell tool (e.g., `bash`, `run_command`, `rg`, or `search_file`) to find the file.
    - Example (bash): `find . -name "<basename>"` or `rg --files -g '*<basename>*'`.
 4. **List Parent:** Use your directory listing tool (e.g., `ls` or `list_dir`) on the suspected parent directory to see available files.
+5. **Route Fallback:** If a route file does not exist, locate the framework’s routing entrypoint(s) (e.g., main app bootstrap, router registration, or URL map files) and cite those definitions instead.
+
+**Verified Writing Strategy:**
+- When creating payloads, scripts, or small files, prefer the **`write_file`** tool (alias).
+- It takes `path` and `content` directly, bypassing shell quoting issues that often cause "unexpected EOF" errors.
 
 **Repo Root Anchor:** The relative path from the project root to the target repository is `{{REPO_PATH}}`.
 

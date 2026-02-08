@@ -37,7 +37,13 @@ export const AUDIT_LOGS_DIR = path.join(DOKODEMODOOR_ROOT, 'audit-logs');
  */
 export function generateSessionIdentifier(sessionMetadata) {
   const { id, webUrl } = sessionMetadata;
-  const hostname = new URL(webUrl).hostname.replace(/[^a-zA-Z0-9-]/g, '-');
+  let hostname = 'unknown';
+  try {
+    const url = (webUrl && webUrl.includes('://')) ? webUrl : `http://${webUrl || 'localhost'}`;
+    hostname = new URL(url).hostname.replace(/[^a-zA-Z0-9-]/g, '-');
+  } catch (e) {
+    // Fallback if URL parsing still fails
+  }
   return `${hostname}_${id}`;
 }
 

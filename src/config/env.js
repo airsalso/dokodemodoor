@@ -91,7 +91,7 @@ export const config = {
 
     debug: parseBoolean(process.env.DOKODEMODOOR_DEBUG, false),
     disableLoader: parseBoolean(process.env.DOKODEMODOOR_DISABLE_LOADER, false),
-    logPromptSizes: parseBoolean(process.env.DOKODEMODOOR_LOG_PROMPT_SIZES, false),
+    logPromptSizes: parseBoolean(process.env.DOKODEMODOOR_PRINT_LOG_PROMPT_SIZES, false),
     skipToolCheck: parseBoolean(process.env.DOKODEMODOOR_SKIP_TOOL_CHECK, false),
     skipNmap: parseBoolean(process.env.DOKODEMODOOR_SKIP_NMAP, false),
     skipSubfinder: parseBoolean(process.env.DOKODEMODOOR_SKIP_SUBFINDER, false),
@@ -105,14 +105,15 @@ export const config = {
     agentMaxTurns: {
       'osv-analysis': parseIntDecimal(process.env.DOKODEMODOOR_OSV_MAX_TURNS, null),
       'recon': parseIntDecimal(process.env.DOKODEMODOOR_RECON_MAX_TURNS, null),
-      'pre-recon': parseIntDecimal(process.env.DOKODEMODOOR_PRE_RECON_MAX_TURNS, null),
-      'api-fuzzer': parseIntDecimal(process.env.DOKODEMODOOR_API_FUZZER_MAX_TURNS, 100),
+      'pre-recon': parseIntDecimal(process.env.DOKODEMODOOR_PRERECON_MAX_TURNS, null),
+      'api-fuzzer': parseIntDecimal(process.env.DOKODEMODOOR_API_FUZZER_MAX_TURNS, null),
+      'report': parseIntDecimal(process.env.DOKODEMODOOR_REPORT_MAX_TURNS, null),
     },
 
 
     contextCompressionThreshold: parseIntDecimal(process.env.DOKODEMODOOR_CONTEXT_COMPRESSION_THRESHOLD, 30000),
     contextCompressionWindow: parseIntDecimal(process.env.DOKODEMODOOR_CONTEXT_COMPRESSION_WINDOW, 15),
-    agentDebugLog: parseBoolean(process.env.DOKODEMODOOR_AGENT_DEBUG_LOG_ENABLED, false),
+    agentDebugLog: parseBoolean(process.env.DOKODEMODOOR_AGENT_DEBUG_LOG, false),
 
     // Pipeline control
     skipExploitation: parseBoolean(process.env.DOKODEMODOOR_SKIP_EXPLOITATION, false),

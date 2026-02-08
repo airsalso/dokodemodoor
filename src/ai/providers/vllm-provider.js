@@ -672,7 +672,7 @@ export class VLLMProvider extends LLMProvider {
    * - Keep system prompt + recent window.
    * - Truncate per-message content and enforce tool call pairing.
    */
-  shrinkMessagesToFitLimit(messages, maxChars) {
+  shrinkMessagesToFitLimit(messages, maxChars, agentName = 'generic') {
     if (!maxChars || !Number.isFinite(maxChars)) return messages;
     const totalSize = (msgs) => JSON.stringify(msgs).length;
 
@@ -680,7 +680,8 @@ export class VLLMProvider extends LLMProvider {
 
     console.log(chalk.yellow(`    ⚠️  Prompt size ${totalSize(messages)} chars exceeds ${maxChars}. Trimming...`));
 
-    const compressionWindow = dokodemodoorConfig.dokodemodoor.contextCompressionWindow || 15;
+    const isExploit = (agentName || '').toLowerCase().includes('exploit');
+    const compressionWindow = isExploit ? 30 : (dokodemodoorConfig.dokodemodoor.contextCompressionWindow || 15);
     let window = Math.min(compressionWindow, Math.max(3, messages.length - 1));
     const minWindow = 3;
     const initial = messages[0];
@@ -935,7 +936,7 @@ export class VLLMProvider extends LLMProvider {
             });
           }
         }
-        readyMessages = this.shrinkMessagesToFitLimit(readyMessages, this.maxPromptChars);
+        readyMessages = this.shrinkMessagesToFitLimit(readyMessages, this.maxPromptChars, agentName);
         if (shouldLogPromptSize) {
           const postSize = this.getMessagesSize(readyMessages);
           console.log(chalk.gray(`    🧮 Prompt size (post-trim): ${postSize} chars, messages=${readyMessages.length}`));
@@ -1110,6 +1111,7 @@ export class VLLMProvider extends LLMProvider {
             if (toolName === 'Todo') toolName = 'TodoWrite';
             if (['Tool', 'Task'].includes(toolName)) toolName = 'TaskAgent';
             if (toolName === 'execute_command') toolName = 'bash';
+            if (toolName === 'browse_file') toolName = 'open_file';
 
             try {
               const args = this.safeJSONParse(tc.function.arguments, toolName, agentName);
@@ -1128,6 +1130,11 @@ export class VLLMProvider extends LLMProvider {
 
               if (toolName === 'save_deliverable') {
                 args.deliverable_type = this.getForcedDeliverableType(agentName, args.deliverable_type);
+              }
+
+              if (toolName === 'bash' && args.command && typeof args.command === 'string') {
+                // Defensive: Strip LLM hallucinations like "command: ls" or "bash: ls"
+                args.command = args.command.replace(/^(command|bash|sh):\s*/i, '').trim();
               }
 
               validToolCalls.push({ id: tc.id, name: toolName, arguments: args });
@@ -1339,8 +1346,10 @@ export class VLLMProvider extends LLMProvider {
     console.log(chalk.yellow(`    ⚠️  History large. Compressing...`));
     const findings = this.extractFindings(messages, agentName, targetDir);
 
+    const isExploit = (agentName || '').toLowerCase().includes('exploit');
+    const window = isExploit ? 30 : (dokodemodoorConfig.dokodemodoor.contextCompressionWindow || 15);
     const initial = messages[0];
-    const recent = messages.slice(-15);
+    const recent = messages.slice(-window);
     const marker = {
       role: 'user',
       content: `[HISTORY COMPRESSED]\n\n**STATUS:**\n- Completed: ${Array.from(findings.doneTasks).join(', ')}\n- Staged: ${findings.stagedFiles.length} files\n- Todo:\n${findings.lastTodo}\n\nContinue from the latest state.`

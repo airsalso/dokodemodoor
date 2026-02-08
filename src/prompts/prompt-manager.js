@@ -144,6 +144,47 @@ async function processIncludes(content, baseDir) {
   return content;
 }
 
+// Pure function: Collect security context from deliverables
+/**
+ * [목적] deliverables 폴더의 OSV 및 Semgrep 결과물을 수집하여 프롬프트에 제공.
+ */
+async function collectSecurityContext(repoPath) {
+  try {
+    const securityContext = [];
+    const deliverablesDir = path.join(repoPath, 'deliverables');
+
+    if (!await fs.pathExists(deliverablesDir)) return '';
+
+    const securityFiles = [
+      { name: 'osv_analysis_deliverable.md', title: 'Open Source Vulnerabilities (SCA)' },
+      { name: 'semgrep_analysis_deliverable.md', title: 'Static Analysis Hotspots (Semgrep)' }
+    ];
+
+    for (const file of securityFiles) {
+      const filePath = path.join(deliverablesDir, file.name);
+      if (await fs.pathExists(filePath)) {
+        const content = await fs.readFile(filePath, 'utf8');
+        // Limit each context to avoid token overflow
+        const truncated = content.length > 5000 ? content.slice(0, 5000) + '... (truncated)' : content;
+        securityContext.push(`### ${file.title}\n${truncated}`);
+      }
+    }
+
+    if (securityContext.length === 0) return '';
+
+    return `
+## 🛡️ SECURITY LANDSCAPE CONTEXT (PRE-CALCULATED)
+The following information was gathered by automated security tools.
+Use this as a REASONING FOUNDATION, but do not satisfy yourself with only these findings.
+Your mission is to find logical flaws and complex vulnerabilities that these tools miss.
+
+${securityContext.join('\n\n---\n\n')}
+`.trim();
+  } catch (err) {
+    return ''; // Fail silently for security context
+  }
+}
+
 // Pure function: Variable interpolation
 /**
  * [목적] 프롬프트 템플릿 변수들을 실제 값으로 치환.
@@ -186,11 +227,17 @@ async function interpolateVariables(template, variables, config = null, baseDir 
       );
     }
 
+    const securityContext = await collectSecurityContext(variables.repoPath);
+
     let result = template
       .replace(/{{WEB_URL}}/g, variables.webUrl)
       .replace(/{{REPO_PATH}}/g, variables.repoPath)
       .replace(/{{MCP_SERVER}}/g, variables.MCP_SERVER || 'playwright-agent1')
       .replace(/{{VULNERABILITY_DATA}}/g, variables.vulnerabilityData || '[]')
+      .replace(/{{VULNERABILITY_COUNT}}/g, variables.vulnerabilityCount || '0')
+      .replace(/{{QUEUE_SUMMARY}}/g, variables.queueSummary || 'No queue summary available.')
+      .replace(/{{SECURITY_CONTEXT}}/g, securityContext)
+      .replace(/{{VLLM_MAX_TURNS}}/g, config?.llm?.vllm?.maxTurns || process.env.VLLM_MAX_TURNS || '100')
       .replace(/{{XSS_TEST}}/g, 'DOKODEMO_XSS_MARKER');
 
     if (config) {
@@ -250,8 +297,15 @@ async function interpolateVariables(template, variables, config = null, baseDir 
     const remainingPlaceholders = result.match(/\{\{[^}]+\}\}/g);
     if (remainingPlaceholders) {
       const actualPlaceholders = remainingPlaceholders.filter(p => {
-        // Ignore math/expression examples like {{7*7}} or {{ user_input }}
-        if (p.includes('*') || p.includes('user_input')) return false;
+        const pLower = p.toLowerCase();
+        // Ignore math/expression examples, common SSTI payloads, or user input placeholders
+        if (p.includes('*') ||
+            pLower.includes('user_input') ||
+            pLower.includes('expr') ||
+            pLower.includes('config') ||
+            pLower.includes('request') ||
+            pLower.includes('self') ||
+            pLower.includes('settings')) return false;
         return true;
       });
 

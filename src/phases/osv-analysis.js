@@ -2,6 +2,7 @@ import { fs, path, $ } from 'zx';
 import chalk from 'chalk';
 import { PentestError } from '../error-handling.js';
 import { getAgentName, getTargetDir } from '../utils/context.js';
+import { getLogTimestamp } from '../utils/time-utils.js';
 
 /**
  * [목적] 오픈소스 취약점 분석(SCA) 단계 수행.
@@ -35,7 +36,7 @@ export async function executeOsvAnalysisPhase(session, runAgentPromptWithRetry, 
   for (const ecosystem of ecosystems) {
     console.log(chalk.gray(`   Processing ${ecosystem.type} dependencies...`));
     const deps = await extractDependencies(ecosystem);
-    const vulns = await queryOsvBatch(deps, ecosystem.type);
+    const vulns = await queryOsvBatch(deps, ecosystem.type, sourceDir);
     allVulnerabilities.push(...vulns);
   }
 
@@ -43,7 +44,8 @@ export async function executeOsvAnalysisPhase(session, runAgentPromptWithRetry, 
     console.log(chalk.green('✅ No known vulnerabilities found in open source dependencies.'));
     // We still run the agent to provide a clean report if needed, or just exit
   } else {
-    console.log(chalk.red(`🚨 Found ${allVulnerabilities.length} potential vulnerabilities.`));
+    const totalVulnCount = allVulnerabilities.reduce((acc, curr) => acc + (curr.vulnerabilities?.length || 0), 0);
+    console.log(chalk.red(`🚨 Found ${totalVulnCount} individual vulnerabilities across ${allVulnerabilities.length} packages.`));
   }
 
   // 3. AI Analysis
@@ -76,14 +78,15 @@ export async function executeOsvAnalysisPhase(session, runAgentPromptWithRetry, 
         const reportContent = await fs.readFile(reportFile, 'utf8');
         const queueData = await fs.readJson(queueFile);
 
-        const reportMatchCount = (reportContent.match(/^### /gm) || []).length;
+        // Match headers like ### Package (CVE-ID) or ### Package [CVE-ID]
+        const reportMatchCount = (reportContent.match(/^### .*/gm) || []).length;
         const queueCount = queueData.vulnerabilities?.length || 0;
 
-        if (reportMatchCount !== queueCount) {
-          console.log(chalk.yellow(`\n⚠️  Consistency Warning: Report has ${reportMatchCount} items, but Queue has ${queueCount} items.`));
-          console.log(chalk.gray(`   Please ensure the agent saves all confirmed vulnerabilities in both formats.`));
+        if (reportMatchCount < queueCount) {
+          console.log(chalk.yellow(`\n⚠️  Consistency Warning: Report has ${reportMatchCount} sections, but Queue has ${queueCount} vulnerabilities.`));
+          console.log(chalk.gray(`   It seems the agent might have merged some findings or skipped the report sections.`));
         } else {
-          console.log(chalk.green(`\n✅ Consistency Verified: Both deliverables contain ${queueCount} vulnerabilities.`));
+          console.log(chalk.green(`\n✅ Consistency Verified: Both deliverables contain ${queueCount} vulnerability entries.`));
         }
       }
     } catch (err) {
@@ -153,7 +156,7 @@ async function extractDependencies(ecosystem) {
  * Queries OSV.dev API for a list of dependencies.
  * Uses metadata-only to preserve privacy.
  */
-async function queryOsvBatch(deps, ecosystemType) {
+async function queryOsvBatch(deps, ecosystemType, sourceDir) {
   // OSV.dev API expects batch queries in a specific format
   // For simplicity and to avoid large payloads, we query them in smaller batches or individually
   const vulns = [];
@@ -168,8 +171,8 @@ async function queryOsvBatch(deps, ecosystemType) {
   const ecosystem = OSV_ECOSYSTEM_MAP[ecosystemType];
   if (!ecosystem) return [];
 
-  // Limit to first 20 dependencies for the demo/initial version to prevent rate limiting or huge logs
-  const targetDeps = deps.slice(0, 50);
+  // Limit to first 500 dependencies for the demo/initial version to prevent rate limiting or huge logs
+  const targetDeps = deps.slice(0, 500);
 
   for (const dep of targetDeps) {
     try {
@@ -182,6 +185,18 @@ async function queryOsvBatch(deps, ecosystemType) {
         }
       };
 
+      // 🔍 Log the outbound request for security auditing
+      const projectName = path.basename(sourceDir);
+      const timestamp = getLogTimestamp();
+      const logEntry = `[${timestamp}] Project: ${projectName} | OSV Request: ecosystem=${ecosystem}, package=${dep.name}, version=${dep.version}\n`;
+      try {
+        const osvLogDir = path.join(process.cwd(), 'osv-logs');
+        if (!await fs.pathExists(osvLogDir)) await fs.ensureDir(osvLogDir);
+        await fs.appendFile(path.join(osvLogDir, 'outbound_osv_requests.log'), logEntry);
+      } catch (err) {
+        // Silently continue if logging fails
+      }
+
       const response = await $`curl -s -X POST -d ${JSON.stringify(query)} https://api.osv.dev/v1/query`;
       const data = JSON.parse(response.stdout);
 
@@ -192,7 +207,7 @@ async function queryOsvBatch(deps, ecosystemType) {
           vulnerabilities: data.vulns.map(v => ({
             id: v.id,
             summary: v.summary,
-            details: v.details,
+            details: v.details?.substring(0, 1000), // Truncate very long details to save prompt tokens
             published: v.published
           }))
         });

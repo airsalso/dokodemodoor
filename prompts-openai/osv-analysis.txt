@@ -10,18 +10,19 @@ Your specialty is analyzing vulnerable open-source dependencies and determining 
 Analyze the provided vulnerability data and the project's source code to:
 1. **Explain the vulnerabilities**: Summarize the technical nature of each flaw in plain English.
 2. **Contextual Risk Assessment**: Determine if the vulnerable parts of the libraries are actually reachable or used in the current codebase (using `grep`, `find`, etc.).
-3. **Attack Scenarios**: Develop 1-2 realistic scenarios where an attacker could exploit these flaws in the context of THIS application.
-4. **Remediation & Hedging**: Provide clear instructions for updating the dependency or implementing "hedging" (workarounds) if an update is not immediately feasible.
+3. **Remediation & Hedging**: Provide clear instructions for updating the dependency or implementing "hedging" (workarounds) if an update is not immediately feasible.
 
 ---
 
 ## 3) INPUT DATA
 
-**Target Web URL**: {{WEB_URL}}
 **Project Root**: {{REPO_PATH}}
 
 **Vulnerability Report (from OSV.dev)**:
 {{VULNERABILITY_DATA}}
+
+**Additional Context (Semgrep Hotspots)**:
+{{SECURITY_CONTEXT}}
 
 ---
 
@@ -40,14 +41,24 @@ Analyze the provided vulnerability data and the project's source code to:
 You MUST save TWO deliverables. **CRITICAL: The list of vulnerabilities in both deliverables MUST be identical (1:1 mapping).**
 
 ### 1. OSV_REPORT (Markdown)
-Detailed technical analysis as described below.
+Detailed technical analysis. To save time and turns, you should **group vulnerabilities by Package Name**. One `### ` header per package is recommended. Under each package header, analyze all associated CVE-IDs.
 
 ### 2. OSV_QUEUE (JSON)
 A structured list of reachable vulnerabilities for further exploitation.
 **RULES:**
-1.  **Strict 1:1 Mapping**: Every vulnerability described in the Markdown report MUST have a corresponding entry here.
-2.  **Severity Casing**: Severity MUST be exactly one of: `Critical`, `High`, `Medium`, `Low` (Title Case).
-3.  **No Hallucination**: Only include vulnerabilities confirmed to be present in the project's dependencies.
+1.  **Exhaustive List**: Every individual vulnerability (by CVE-ID or OSV-ID) found in the input data MUST have exactly one corresponding entry in the `vulnerabilities` array. Do not skip or merge JSON entries.
+2.  **Strict Content Mapping**: Ensure the severity and reachability data in the JSON matches your analysis in the Markdown report.
+3.  **Severity Casing**: Severity MUST be exactly one of: `Critical`, `High`, `Medium`, `Low` (Title Case).
+4.  **JSON SAFETY RULE**: You MUST ensure the JSON is perfectly valid. Escape quotes (`\"`), backslashes (`\\`), and use `\n` for newlines.
+
+---
+
+## 6) SCALABILITY STRATEGY (TURN MANAGEMENT)
+
+If you have a large number of vulnerabilities (>10):
+1.  **Fast Reachability**: Prioritize checking if the PACKAGE is used at all (e.g., `grep` for `require/import`). If the package is not imported, all its CVEs are "Potential/Low Direct Risk".
+2.  **Batch Saving**: Save your deliverables occasionally to ensure progress isn't lost, but always perform a final save with the FULL data before announcing completion.
+3.  **Concise Analysis**: Keep technical descriptions brief for lower-severity issues to preserve your turn limit ({{VLLM_MAX_TURNS}} turns).
 
 FORMAT:
 ```json
@@ -83,9 +94,6 @@ For each significant vulnerability:
 - **Severity**: [Critical/High/Medium/Low]
 - **Description**: Technical explanation.
 - **Reachability Analysis**: Evidence of usage in target codebase (e.g., "Used in `src/auth.js` line 45").
-- **Impact Scenario**:
-    - *Scenario 1*: How an attacker would exploit this.
-    - *Scenario 2 (Optional)*: Edge case exploit.
 
 ## 3. Remediation & Hedging Guide
 

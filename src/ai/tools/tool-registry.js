@@ -301,12 +301,15 @@ export async function registerMCPTools() {
     executeBash
   );
 
-  toolRegistry.register(
-    'Bash',
-    'Alias for bash tool',
-    BashToolSchema,
-    executeBash
-  );
+  const directAliases = ['Bash', 'sh', 'execute_command'];
+  for (const alias of directAliases) {
+    toolRegistry.register(
+      alias,
+      'Alias for bash tool',
+      BashToolSchema,
+      executeBash
+    );
+  }
 
   toolRegistry.register(
     'TodoWrite',
@@ -345,7 +348,7 @@ export async function registerMCPTools() {
   );
 
   // Common aliases for main agent as well
-  const bashAliases = ['grep', 'search_file', 'open_file', 'read_file', 'ls', 'find', 'list_files', 'rg'];
+  const bashAliases = ['run_command', 'grep', 'search_file', 'open_file', 'read_file', 'browse_file', 'view_file', 'ls', 'find', 'list_files', 'rg', 'write_file', 'save_file'];
   for (const alias of bashAliases) {
     toolRegistry.register(
       alias,
@@ -354,12 +357,24 @@ export async function registerMCPTools() {
         command: z.string().optional(),
         path: z.string().optional(),
         query: z.string().optional(),
+        cwd: z.string().optional(),
         line_start: z.coerce.number().optional(),
         line_end: z.coerce.number().optional(),
-        max_results: z.coerce.number().optional()
+        max_results: z.coerce.number().optional(),
+        content: z.string().optional()
       }),
       async (p) => {
         let cmd = p.command;
+
+        // Defensive: Strip LLM hallucinations like "command: ls" or "bash: ls" or "{command: ls}"
+        if (typeof cmd === 'string') {
+          let cleaned = cmd.trim();
+          // Handle unquoted pseudo-JSON like "{command: curl ...}"
+          cleaned = cleaned.replace(/^\{\s*(command|bash|sh|sh -c)\s*:\s*/i, '');
+          cleaned = cleaned.replace(/^(command|bash|sh|sh -c)\s*:\s*/i, '');
+          cleaned = cleaned.replace(/\}\s*$/, '');
+          cmd = cleaned.trim();
+        }
 
         // Cache rg availability for faster searches when possible
         if (typeof global.__DOKODEMODOOR_RG_AVAILABLE === 'undefined') {
@@ -381,6 +396,7 @@ export async function registerMCPTools() {
         // Path normalization: Safe guarding against LLM omitting leading slash on absolute paths.
         if (p.path) {
           const targetDir = getTargetDir();
+          const repoPath = '{{REPO_PATH}}'; // This is a placeholder that gets replaced in some contexts, but here we use it as a hint for relative paths
 
           // Resolve relative paths against repo root
           if (!path.isAbsolute(p.path)) {
@@ -396,7 +412,8 @@ export async function registerMCPTools() {
             try {
               const { execSync } = await import('child_process');
               const base = path.basename(p.path);
-              const cmd = `rg --files -g '*${base}*' ${shQuote(targetDir)} | head -n 1`;
+              // Prioritize exact filename match in any subdirectory
+              const cmd = `rg --files -g '**/${base}' ${shQuote(targetDir)} | head -n 1`;
               const match = execSync(cmd, { encoding: 'utf8' }).trim();
               if (match) {
                 p.path = match;
@@ -435,8 +452,33 @@ export async function registerMCPTools() {
         }
 
         // Logical mapping based on alias and provided parameters
-        if (alias === 'open_file' || alias === 'read_file') {
+        if (alias === 'write_file' || alias === 'save_file') {
+          if (p.path && p.content !== undefined) {
+            try {
+              const targetDir = getTargetDir();
+              const fullPath = path.isAbsolute(p.path) ? p.path : path.resolve(targetDir, p.path);
+
+              // Ensure directory exists
+              const dir = path.dirname(fullPath);
+              if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+              }
+
+              fs.writeFileSync(fullPath, p.content, 'utf8');
+              return { status: 'success', message: `File saved to ${p.path}` };
+            } catch (e) {
+              return { status: 'error', message: `Failed to save file: ${e.message}` };
+            }
+          }
+          return { status: 'error', message: 'write_file requires both path and content' };
+        }
+
+        if (alias === 'open_file' || alias === 'read_file' || alias === 'browse_file' || alias === 'view_file') {
           if (!cmd && p.path) {
+            // Defensive: Check if path is actually file content (hallucination)
+            if (p.path.includes('\n') || p.path.length > 512) {
+              return { status: 'error', message: `Path argument looks like file content, not a valid path. Please provide a relative or absolute file path.` };
+            }
             if (p.line_start !== undefined || p.line_end !== undefined) {
               const start = p.line_start || 1;
               const end = p.line_end || '$';
@@ -446,7 +488,7 @@ export async function registerMCPTools() {
               cmd = `cat ${shQuote(p.path)}`;
             }
           }
-        } else if (alias === 'grep' || alias === 'search_file') {
+        } else if (alias === 'grep' || alias === 'search_file' || alias === 'rg') {
           if (p.query) {
             const max = p.max_results || 100;
             const targetPath = p.path || '.';

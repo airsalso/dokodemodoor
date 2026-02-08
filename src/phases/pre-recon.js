@@ -1,6 +1,7 @@
 import { $, fs, path } from 'zx';
 import chalk from 'chalk';
 import { Timer, timingResults } from '../utils/metrics.js';
+import { fileURLToPath } from 'url';
 import { formatDuration } from '../audit/utils.js';
 import { handleToolError, PentestError } from '../error-handling.js';
 import { AGENTS } from '../session-manager.js';
@@ -169,6 +170,57 @@ async function runTerminalScan(tool, target, sourceDir = null) {
   }
 }
 
+async function runSemgrepAnalysis(sourceDir) {
+  const timer = new Timer('semgrep-analysis');
+  try {
+    console.log(chalk.blue(`    🔍 Running Semgrep security surface analysis...`));
+    // Resolve the path to the semgrep-analyzer.mjs script relative to this file
+    const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/semgrep-analyzer.mjs');
+
+    const result = await $({ silent: true })`node ${scriptPath} ${sourceDir}`.catch(e => e);
+
+    const duration = timer.stop();
+    timingResults.commands['semgrep-analyzer'] = duration;
+
+    if (result.exitCode === 0) {
+      console.log(chalk.green(`    ✅ Semgrep analysis completed in ${formatDuration(duration)}`));
+      return { tool: 'semgrep', status: 'success', duration };
+    } else {
+      console.log(chalk.yellow(`    ⚠️  Semgrep analysis exited with code ${result.exitCode}`));
+      return { tool: 'semgrep', status: 'warning', duration };
+    }
+  } catch (error) {
+    const duration = timer.stop();
+    console.log(chalk.yellow(`    ⚠️  Semgrep analysis failed: ${error.message}`));
+    return { tool: 'semgrep', status: 'error', duration };
+  }
+}
+
+async function runOSVAnalysis(sourceDir) {
+  const timer = new Timer('osv-analysis');
+  try {
+    console.log(chalk.blue(`    🔍 Running OSV security analysis (SCA)...`));
+    const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/osv-scanner.mjs');
+
+    const result = await $({ silent: true })`node ${scriptPath} ${sourceDir}`.catch(e => e);
+
+    const duration = timer.stop();
+    timingResults.commands['osv-analyzer'] = duration;
+
+    if (result.exitCode === 0) {
+      console.log(chalk.green(`    ✅ OSV analysis completed in ${formatDuration(duration)}`));
+      return { tool: 'osv', status: 'success', duration };
+    } else {
+      console.log(chalk.yellow(`    ⚠️  OSV analysis exited with code ${result.exitCode}`));
+      return { tool: 'osv', status: 'warning', duration };
+    }
+  } catch (error) {
+    const duration = timer.stop();
+    console.log(chalk.yellow(`    ⚠️  OSV analysis failed: ${error.message}`));
+    return { tool: 'osv', status: 'error', duration };
+  }
+}
+
 // Wave 1: Initial footprinting + authentication
 /**
  * [목적] Pre-Recon 1차 웨이브 실행 (스캔/코드분석).
@@ -196,6 +248,12 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
     console.log(chalk.blue('    → Running Wave 1 operations sequentially for best performance on local LLM...'));
 
     let nmap, subfinder, whatweb, codeAnalysis;
+
+    // Run Semgrep and OSV first to provide context for the code analysis agent
+    await Promise.all([
+      runSemgrepAnalysis(sourceDir),
+      runOSVAnalysis(sourceDir)
+    ]);
 
     // Nmap
     if (skipNmap) {
@@ -249,6 +307,14 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
 
   // Wave 1: Initial footprinting (Parallel)
   console.log(chalk.gray(`    → Launching Wave 1 operations in parallel...`));
+
+  // Run Semgrep and OSV first (sequentially before others) to ensure context for the AI agent
+  // Even in parallel mode, this provides the "foundation" file
+  await Promise.all([
+    runSemgrepAnalysis(sourceDir),
+    runOSVAnalysis(sourceDir)
+  ]);
+
   const operations = [];
 
   // Nmap
@@ -452,7 +518,7 @@ const dedupeEndpointLists = (content) => {
 async function stitchPreReconOutputs(outputs, sourceDir) {
   const [nmap, subfinder, whatweb, codeAnalysis, ...additionalScans] = outputs;
 
-  // Try to read the code analysis deliverable file
+  // Read analysis deliverables
   let codeAnalysisContent = 'No analysis available';
   try {
     const codeAnalysisPath = path.join(sourceDir, 'deliverables', 'code_analysis_deliverable.md');
@@ -460,10 +526,13 @@ async function stitchPreReconOutputs(outputs, sourceDir) {
     codeAnalysisContent = dedupeEndpointLists(codeAnalysisContent);
   } catch (error) {
     console.log(chalk.yellow(`⚠️ Could not read code analysis deliverable: ${error.message}`));
-    // Fallback message if file doesn't exist
     codeAnalysisContent = 'Analysis located in deliverables/code_analysis_deliverable.md';
   }
 
+  // Build references instead of full content to save context
+  const semgrepContent = 'Detailed findings available in `deliverables/semgrep_analysis_deliverable.md` (Already injected via {{SECURITY_CONTEXT}} for reasoning).';
+
+  const osvContent = 'Detailed findings available in `deliverables/osv_analysis_deliverable.md`.';
 
   // Build additional scans section
   let additionalSection = '';
@@ -505,6 +574,13 @@ ${(() => {
 })()}
 ## Code Analysis
 ${codeAnalysisContent}
+
+## Static Analysis Hotspots (Semgrep)
+${semgrepContent}
+
+## Open Source Vulnerabilities (SCA/OSV)
+${osvContent}
+
 ${additionalSection}
 ---
 Report generated at: ${getLocalISOString()}

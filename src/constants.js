@@ -115,10 +115,13 @@ export const MCP_AGENT_MAPPING = Object.freeze({
   'exploit-xss': 'playwright-agent2',
   'exploit-auth': 'playwright-agent3',
   'exploit-ssrf': 'playwright-agent4',
-  'exploit-authz': 'playwright-agent5'
+  'exploit-authz': 'playwright-agent5',
 
   // Phase 5: Reporting
   // REMOVED: report doesn't need Playwright (document writing only)
+
+  // OSV Analysis agent
+  'osv-analysis': 'dokodemodoor-helper'
 });
 
 // Direct agent-to-validator mapping - much simpler than pattern matching

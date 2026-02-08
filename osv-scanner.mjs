@@ -39,13 +39,13 @@ async function main() {
     args = args.slice(1);
   }
 
-  const webUrl = args[0] || 'http://localhost'; // Default if not provided
-  const repoPath = args[1];
+  const repoPath = args[0];
+  const webUrl = args[1] || 'http://localhost'; // Optional URL
   const configPath = args[2] || null;
 
   if (!repoPath) {
     console.log(chalk.red('❌ Missing repository path.'));
-    console.log(chalk.gray('Usage: ./osv-scanner.mjs <target_url> <repo_path> [config_path]'));
+    console.log(chalk.gray('Usage: ./osv-scanner.mjs <repo_path> [target_url] [config_path]'));
     process.exit(1);
   }
 
@@ -55,8 +55,8 @@ async function main() {
   await displaySplashScreen();
 
   console.log(chalk.magenta.bold('🚀 DOKODEMODOOR OSV STANDALONE SCANNER'));
-  console.log(chalk.cyan(`🎯 Target: ${webUrl}`));
   console.log(chalk.cyan(`📁 Source: ${repoPath}`));
+  if (args[1]) console.log(chalk.cyan(`🎯 Target URL: ${webUrl}`));
 
   // 1. Setup Repository
   let sourceDir;
@@ -97,6 +97,7 @@ async function main() {
 }
 
 main().catch(async (error) => {
-  console.error(chalk.red('\n💥 Fatal Error:'), error);
+  console.error(chalk.red('\n💥 Fatal Error:'), error.message);
+  if (error.stack) console.error(chalk.gray(error.stack));
   process.exit(1);
 });

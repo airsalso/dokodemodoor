@@ -21,3 +21,11 @@ export function getLocalISOString(dateInput = new Date()) {
 
   return iso.slice(0, -1) + timezoneSub;
 }
+
+/**
+ * [목적] 로그용 가독성 좋은 현지 시간 문자열 반환 (YYYY-MM-DD HH:mm:ss)
+ */
+export function getLogTimestamp(dateInput = new Date()) {
+  const iso = getLocalISOString(dateInput);
+  return iso.replace('T', ' ').split('.')[0];
+}

@@ -77,6 +77,14 @@ Repository Path: {{REPO_PATH}}
 - If a path fails, **retry only within {{REPO_PATH}}**.
 - Do **not** run recursive dumps like `ls -R .` or `ls -R {{REPO_PATH}}`. Use targeted discovery (e.g., `rg --files {{REPO_PATH}} | head -n 200`).
 
+### 4.5 Pre-Calculated Security Context (SUPPLEMENTAL)
+{{SECURITY_CONTEXT}}
+
+**Guideline for Tool-AI Synergy:**
+- **The Ceiling of Tools is your Floor:** Traditional tools like Semgrep/OSV are limited by their rulesets. Treat their findings as guaranteed "low-hanging fruit" and use them to jumpstart your mapping.
+- **Beyond Syntax:** Tools find patterns; you find **Logic**. Focus on how different endpoints interact, how state is managed across requests, and how business rules can be twisted.
+- **Verify but Explore:** Briefly verify tool candidates, but spend 80% of your energy on the **logical gaps** that these tools cannot see (e.g., IDOR in complex workflows, auth bypass via multi-step logic).
+
 ---
 
 ## 5) STATE MANAGEMENT & PERSISTENCE (CORE MEMORY)
