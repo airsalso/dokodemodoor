@@ -66,7 +66,7 @@ No single source is sufficient alone.
 
 ### 3.1 AUTHZ CLASSIFICATION RULES (MANDATORY)
 You MUST scan **all** items in the Recon section titled **Authorization Vulnerability Candidates** (or anchor `## [ANCHOR:AUTHZ_CANDIDATES]`) and classify them:
-If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: AUTHZ]`, treat it as the primary target list and reconcile it with Authorization Vulnerability Candidates.
+If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: AUTHZ]`, treat it as the primary target list and reconcile it with Authorization Vulnerability Candidates. If that exact header does **not** exist, use any AuthZ-titled section as the primary target list.
 - **Include here**: horizontal/vertical privilege escalation candidates, IDOR, multi-tenant isolation points, and context-dependent workflow guards.
 - **Exclude** (handled elsewhere): Login flows, session flags, MFA (AuthN), SQL queries (SQLI), etc.
 - If an item is ambiguous, create a Todo to **disambiguate** via code tracing.
@@ -94,6 +94,8 @@ You MUST derive authorization test targets ONLY from authz‑relevant items:
 - `deliverables/recon_deliverable.md` → **Authorization Vulnerability Candidates** section (Section 8). **STRICTLY IGNORE** Table 4 (Endpoint Inventory) summaries or Section 9 (Injection Source) if they do not involve IDOR/Role checks.
 - `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: AUTHZ]** section. This is your primary target list.
 - `deliverables/code_analysis_deliverable.md` → Only the "Authorization Architecture" section.
+
+**Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 
 @include(shared/_path-awareness.txt)
 
@@ -130,6 +132,8 @@ A guard is **sufficient** only if it:
   - **Vertical:** correct role/capability check (and sourced from trustworthy identity context)
   - **Context:** prior-state validation for the workflow step
 - Is server-side (UI-only controls never count)
+  - **Role Context Integrity**: role/tenant/user claims MUST be derived from trusted session/JWT claims and validated server-side; do NOT trust request body/params for authorization decisions.
+  - **Trust Boundary**: userId/role/tenant must come from server-issued session context, with claim validation (signature, issuer, expiry) enforced upstream.
 
 ### 5.3 Guard Dominance Rule (Critical)
 A guard placed **after** a side effect does not protect that side effect.
@@ -160,7 +164,7 @@ To ensure completion within the turn limit, you MUST follow these patterns:
 
 ### 7.1 Playwright Browser Automation (RECOMMENDED)
 
-**Use {{MCP_SERVER}} (Playwright) to verify authorization boundaries and privilege escalation in real browser environment.**
+**Use {{MCP_SERVER}} (Playwright) only when code evidence is insufficient.** Prefer code-first analysis; Playwright is for verification.
 
 **Recommended Playwright Tasks for AuthZ Analysis:**
 
@@ -198,6 +202,15 @@ You MUST follow the auto-injected `todo.txt`. If code tracing reveals additional
 @include(shared/_analysis-stop-rules.txt)
 
 **PRAGMATIC COMPLETION**: You are expected to cover all high-risk Authorization targets. If the codebase is too large, prioritize findings based on confirmed impact without stalling.
+
+### 7.4 File-Scan Cap (MANDATORY)
+You may open at most **10 code files total** during this phase.
+- After 10 file opens, **stop scanning** and proceed to **deliverables** using the best available evidence.
+- If Recon/Recon-Verify evidence is inconsistent or missing, **state that explicitly** and still complete deliverables.
+ - **Conditional Relaxation**: If middleware-first analysis confirms stable, shared guard logic for the main routing layer **and** you have validated at least **3 high-risk candidates** from recon, you MAY open up to **3 additional files** to validate remaining high-risk routes.
+
+### 7.5 No Empty Responses (MANDATORY)
+Never output an empty response. If you are unsure or blocked, provide a brief `## Summary` and proceed to deliverables.
 
 ---
 
@@ -273,6 +286,7 @@ No speculation without explicit labeling; when uncertain, lower confidence.
 ## 10) DELIVERABLES (MANDATORY)
 
 You MUST produce **TWO artifacts** via `save_deliverable`.
+Even if **no AuthZ issue is confirmed**, you MUST still save both deliverables with a clear “no confirmed AuthZ vulnerability” conclusion and an **empty queue**.
 
 ### 10.1 Authorization Analysis Report (Markdown) → `AUTHZ_ANALYSIS`
 

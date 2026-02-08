@@ -40,10 +40,13 @@ You do **not** exploit in this phase; you prove **reachability + boundary mismat
 Network-reachable inputs (params/body/headers/cookies/upload fields/filenames) that reach:
 - **READ sinks**: readFile/open, sendFile/download, file streaming
 - **WRITE sinks**: writeFile/save/upload, export generation, report dumps, log writes. **PRIORITIZE** web-accessible paths (e.g., `public/`, `static/`) that could lead to RCE via script upload.
+  - **Web-Accessible Heuristic**: treat a path as web-accessible if it is served by static/route handlers or synced to a CDN.
 - **INCLUDE/IMPORT sinks**: require/include/import from dynamic paths
 - **TEMPLATE PATH sinks**: render/view/layout selection (path/boundary issue only)
 - **ARCHIVE extraction sinks**: unzip/extractall/untar with user-controlled archives or entry names
 - **TEMP path sinks**: creation of temp files/directories. Check for **Symbolic Link** following or race conditions in shared directories like `/tmp`.
+  - **Temp/Race Scope**: Record only **code-level high-risk patterns** (predictable names, no exclusive flags, world-writable dirs) without requiring live exploitation.
+  - **Boundary Reminder**: PATHI is **file path control**; SSTI is **expression evaluation**; SSRF is **network URL fetch** unless a URL-like path is used as a filesystem loader.
 
 ### 2.2 OUT-OF-SCOPE
 - Local-only scripts/migrations/CI tools
@@ -68,7 +71,7 @@ No single source is sufficient alone.
 
 ### 3.1 Injection Source Inventory CLASSIFICATION RULES (MANDATORY)
 You MUST scan **only the Recon section titled Injection Source Inventory** (or anchor `## [ANCHOR:INJECTION_SOURCES]`) and classify those items:
-If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: PATHI]`, treat it as the primary target list and reconcile it with the Injection Source Inventory.
+If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: PATHI]`, treat it as the primary target list and reconcile it with the Injection Source Inventory. If that exact header does **not** exist, use any PATHI‑titled section as the primary target list. If no PATHI section exists, fall back to the Injection Source Inventory and explicitly note the recon gap.
 - **Include here**: file path usage, file read/write/upload/download, archive extraction paths, template/view path selection, temp file paths, and path normalization/boundary checks.
 - **Exclude** (handled elsewhere): SQL/NoSQL queries (SQLI), command/eval/deserialization (CODEI), template expression evaluation (SSTI), browser sinks (XSS), network calls/URL fetch (SSRF).
 - If an item is ambiguous, create a Todo to **disambiguate** via code tracing.
@@ -96,8 +99,10 @@ Repository Path: {{REPO_PATH}}
 
 You MUST derive initial tasks ONLY from filesystem‑relevant items:
 - `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for Path/File/Archive tables/rows only.** Ignore SQLI, XSS, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: PATHI]** section. This is your primary target list.
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: PATHI]** section. This is your primary target list. If that exact header is missing, use any PATHI‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
 - `deliverables/code_analysis_deliverable.md` → Only paths leading to filesystem sinks (read, write, include).
+
+**Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 
 Do **NOT** read the entire recon report. If you cannot isolate the Injection Source Inventory section, explicitly note a blind spot and proceed with a **maximum of 6** high‑risk sink candidates discovered via fast file discovery.
 
@@ -165,8 +170,11 @@ You MUST follow the auto-injected `todo.txt`. If code tracing discovers addition
 @include(shared/_analysis-efficiency-limits.txt)
 @include(shared/_analysis-stop-rules.txt)
 
+**Hard Caps**: After **12 file opens** or **8 searches**, stop discovery, record a recon gap, and proceed to deliverables.
+
 **PRAGMATIC COMPLETION**: If tooling or efficiency limits intervene:
 - Prioritize highest-risk sink families first: **WRITE → INCLUDE → ARCHIVE → READ**
+  - **Override**: If READ paths expose obvious secrets or config, prioritize READ for immediate triage.
 - Produce deliverables based on confirmed findings without stalling.
 
 ---
@@ -185,6 +193,8 @@ For each Todo path, you MUST record:
 7. **Slot Type**: classify (see §7)
 8. **Verdict**: safe or vulnerable, with mismatch rationale
 9. **Witness Payload**: minimal payload appropriate to the sink (not executed)
+
+**High-Signal Sink Keywords (GUIDANCE)**: `sendFile`, `download`, `readFile`, `createReadStream`, `multer`, `formidable`, `archiver`, `unzip`, `extract`, `tar`, `zip`, `tmp`, `mkdtemp`.
 
 ---
 
@@ -209,6 +219,8 @@ For each Todo path, you MUST record:
 - reject absolute paths and traversal segments early (defense-in-depth)
 - **Bypass Awareness**: Check for **Null Byte** (`%00`) injection or **OS-specific reserved names** (Windows: `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) that bypass simple boundary checks.
 - use strict allowlist mapping where possible (enum → known safe filenames)
+
+**Bounded Traversal Classification**: If user input is constrained to a **server-controlled base directory** and canonicalization + boundary checks are enforced, classify the result as **“bounded traversal”** (not a vulnerability), and document the enforced boundary.
 
 **READ / DOWNLOAD**
 - canonicalization + boundary check
@@ -277,6 +289,9 @@ No speculation without explicit labeling; when uncertain, lower confidence.
 ---
 
 ## 12) DELIVERABLES (MANDATORY)
+
+Never output an empty response. If you are unsure or blocked, provide a brief `## Summary` and proceed to deliverables.
+You MUST call `save_deliverable` before ending. If you cannot save, explicitly state why and retry once.
 
 You MUST produce **TWO artifacts** via `save_deliverable`.
 

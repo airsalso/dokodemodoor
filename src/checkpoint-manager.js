@@ -1708,8 +1708,56 @@ export const displayStatus = async (session) => {
 
       const suffixStr = metricsSuffix.length > 0 ? chalk.gray(` [${metricsSuffix.join(' | ')}]`) : '';
       const nameDisplay = agent.name.replace(/-/g, ' ');
-
       console.log(`  ${agentIcon} ${agentStatusColor(nameDisplay.padEnd(20))} ${chalk.bold(agentStatusColor(`[${agentStatusText}]`))}${suffixStr}`);
+    }
+  }
+
+  // Display standalone agents (tools run outside the main phases)
+  const allPhaseAgents = new Set(Object.values(PHASES).flat());
+  const standaloneAgents = Object.keys(AGENTS).filter(name => !allPhaseAgents.has(name));
+
+  if (standaloneAgents.length > 0) {
+    let headerShown = false;
+    for (const agentName of standaloneAgents) {
+      const isCompleted = session.completedAgents.includes(agentName);
+      const isFailed = session.failedAgents.includes(agentName);
+      const isRunning = (session.runningAgents || []).includes(agentName);
+
+      // Only show standalone tools if they have some activity (to keep main status clean)
+      if (isCompleted || isFailed || isRunning) {
+        if (!headerShown) {
+          console.log(`\n${chalk.bold.white('Standalone Tools (External)')}`);
+          headerShown = true;
+        }
+
+        const agent = AGENTS[agentName];
+        let agentIcon, agentStatusText, agentStatusColor;
+
+        if (isCompleted) {
+          agentIcon = chalk.green('✅');
+          agentStatusText = 'COMPLETED';
+          agentStatusColor = chalk.green;
+        } else if (isRunning) {
+          agentIcon = chalk.blue('⏳');
+          agentStatusText = 'RUNNING';
+          agentStatusColor = chalk.blue;
+        } else if (isFailed) {
+          agentIcon = chalk.red('❌');
+          agentStatusText = 'FAILED';
+          agentStatusColor = chalk.red;
+        }
+
+        const auditAgent = auditMetrics?.metrics?.agents?.[agentName];
+        const metricsSuffix = [];
+        if (auditAgent) {
+          if (auditAgent.total_cost_usd > 0) metricsSuffix.push(`$${auditAgent.total_cost_usd.toFixed(4)}`);
+          if (auditAgent.final_duration_ms > 0) metricsSuffix.push(formatDuration(auditAgent.final_duration_ms));
+        }
+
+        const suffixStr = metricsSuffix.length > 0 ? chalk.gray(` [${metricsSuffix.join(' | ')}]`) : '';
+        const nameDisplay = agent.name.replace(/-/g, ' ');
+        console.log(`  ${agentIcon} ${agentStatusColor(nameDisplay.padEnd(20))} ${chalk.bold(agentStatusColor(`[${agentStatusText}]`))}${suffixStr}`);
+      }
     }
   }
 

@@ -10,7 +10,8 @@ import { loadConfig } from './src/config/config-loader.js';
 import { checkToolAvailability } from './src/tool-checker.js';
 
 // Session and Checkpoints
-import { createSession, AGENTS } from './src/session-manager.js';
+import { createSession, AGENTS, markAgentRunning, markAgentCompleted, markAgentFailed } from './src/session-manager.js';
+import { getGitCommitHash } from './src/checkpoint-manager.js';
 
 // Setup and Deliverables
 import { setupLocalRepo } from './src/setup/environment.js';
@@ -31,6 +32,42 @@ import { validateRepoPath } from './src/cli/input-validator.js';
 import { PentestError, logError } from './src/error-handling.js';
 
 $.timeout = 0;
+
+// Track active session globally for signal handlers
+let activeSessionId = null;
+
+/**
+ * [목적] 시그널 수신 시 세션 상태 정리.
+ */
+const cleanupAndExit = async (signal) => {
+  console.log(chalk.yellow(`\n⚠️ Received ${signal}, cleaning up session...`));
+  if (activeSessionId) {
+    try {
+      const { getSession, updateSession } = await import('./src/session-manager.js');
+      const { getLocalISOString } = await import('./src/utils/time-utils.js');
+
+      const session = await getSession(activeSessionId);
+      if (session) {
+        const runningAgents = session.runningAgents || [];
+        const failedAgents = new Set([...(session.failedAgents || []), ...runningAgents]);
+
+        await updateSession(activeSessionId, {
+          status: 'interrupted',
+          lastActivity: getLocalISOString(),
+          runningAgents: [],
+          failedAgents: Array.from(failedAgents)
+        });
+        console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} cleaned up (running -> failed)`));
+      }
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+  process.exit(0);
+};
+
+process.on('SIGINT', () => cleanupAndExit('SIGINT'));
+process.on('SIGTERM', () => cleanupAndExit('SIGTERM'));
 
 async function main() {
   let args = process.argv.slice(2);
@@ -69,6 +106,7 @@ async function main() {
 
   // 2. Create Session
   const session = await createSession(webUrl, repoPath, configPath, sourceDir);
+  activeSessionId = session.id; // Set for global signal handlers
   console.log(chalk.blue(`📝 Session created: ${session.id.substring(0, 8)}...`));
 
   // 3. Load Config
@@ -81,13 +119,23 @@ async function main() {
 
   // 4. Run OSV Analysis
   try {
+    // Mark as running for status visibility
+    await markAgentRunning(session.id, 'osv-analysis');
+
     const result = await executeOsvAnalysisPhase(session, runAgentPromptWithRetry, loadPrompt);
 
     if (result.success) {
+      // Mark as completed in session store
+      const commitHash = await getGitCommitHash(sourceDir);
+      await markAgentCompleted(session.id, 'osv-analysis', commitHash);
+
       console.log(chalk.green.bold('\n✨ OSV analysis completed successfully!'));
       console.log(chalk.gray(`   Deliverables saved in: ${path.join(sourceDir, 'deliverables')}`));
+    } else {
+      await markAgentFailed(session.id, 'osv-analysis');
     }
   } catch (error) {
+    await markAgentFailed(session.id, 'osv-analysis');
     await logError(error, 'OSV Analysis');
     process.exit(1);
   }

@@ -17,32 +17,30 @@ export const checkToolAvailability = async () => {
 
   if (config?.dokodemodoor?.skipToolCheck) {
     console.log(chalk.blue('🔧 Skipping tool availability check (DOKODEMODOOR_SKIP_TOOL_CHECK=true)'));
-    console.log(chalk.gray('  Assuming all tools are available...'));
-
-    const tools = ['nmap', 'subfinder', 'whatweb', 'schemathesis'];
-    const availability = {};
-
-    tools.forEach(tool => {
-      availability[tool] = true;
-      console.log(chalk.green(`  ✅ ${tool} - assumed available`));
-    });
-
-    return availability;
+    return { nmap: true, subfinder: true, whatweb: true, schemathesis: true, semgrep: true, sqlmap: true, curl: true, git: true };
   }
 
-  const tools = ['nmap', 'subfinder', 'whatweb', 'schemathesis'];
+  // Categories of tools
+  const toolChain = {
+    infrastructure: ['git', 'curl'],
+    reconnaissance: ['nmap', 'subfinder', 'whatweb'],
+    analysis: ['semgrep', 'schemathesis', 'rg'],
+    exploitation: ['sqlmap']
+  };
+
+  const allTools = Object.values(toolChain).flat();
   const availability = {};
 
-  console.log(chalk.blue('🔧 Checking tool availability...'));
+  console.log(chalk.blue.bold('\n🔧 CHECKING SECURITY TOOLCHAIN AVAILABILITY...'));
 
-  for (const tool of tools) {
+  for (const tool of allTools) {
     try {
       await $`command -v ${tool}`;
       availability[tool] = true;
-      console.log(chalk.green(`  ✅ ${tool} - available`));
+      console.log(chalk.green(`  ✅ ${tool.padEnd(15)} - available`));
     } catch {
       availability[tool] = false;
-      console.log(chalk.yellow(`  ⚠️ ${tool} - not found`));
+      console.log(chalk.red(`  ❌ ${tool.padEnd(15)} - NOT FOUND`));
     }
   }
 
@@ -51,10 +49,7 @@ export const checkToolAvailability = async () => {
 
 // Handle missing tools with user-friendly messages
 /**
- * [목적] 누락 도구 안내 메시지 출력.
- *
- * [호출자]
- * - dokodemodoor.mjs
+ * [목적] 누락 도구 안내 및 가이드 출력.
  */
 export const handleMissingTools = (toolAvailability) => {
   const missing = Object.entries(toolAvailability)
@@ -62,23 +57,35 @@ export const handleMissingTools = (toolAvailability) => {
     .map(([tool]) => tool);
 
   if (missing.length > 0) {
-    console.log(chalk.yellow(`\n⚠️ Missing tools: ${missing.join(', ')}`));
-    console.log(chalk.gray('Some functionality will be limited. Install missing tools for full capability.'));
+    console.log(chalk.red.bold('\n🚨 CRITICAL WARNING: MISSING TOOLS DETECTED'));
+    console.log(chalk.yellow('   The following security tools were not found in your system PATH.'));
+    console.log(chalk.yellow('   Without these, the quality of the pentest will be significantly degraded.'));
 
     // Provide installation hints
     const installHints = {
-      'nmap': 'brew install nmap (macOS) or apt install nmap (Ubuntu)',
-      'subfinder': 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest',
-      'whatweb': 'gem install whatweb',
-      'schemathesis': 'pip install schemathesis'
+      'git': 'sudo apt install git',
+      'curl': 'sudo apt install curl',
+      'nmap': 'sudo apt install nmap',
+      'subfinder': 'go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest',
+      'whatweb': 'sudo apt install whatweb',
+      'semgrep': 'python3 -m pip install semgrep',
+      'schemathesis': 'pip install schemathesis',
+      'sqlmap': 'pip install sqlmap',
+      'rg': 'sudo apt install ripgrep'
     };
 
-    console.log(chalk.gray('\nInstallation hints:'));
+    console.log(chalk.white('\n📋 INSTALLATION GUIDE:'));
     missing.forEach(tool => {
-      if (installHints[tool]) {
-        console.log(chalk.gray(`  ${tool}: ${installHints[tool]}`));
-      }
+      const hint = installHints[tool] || 'Check official documentation';
+      console.log(`${chalk.red('  •')} ${chalk.bold(tool.padEnd(12))} : ${chalk.gray(hint)}`);
     });
+
+    // Check for essential tools
+    const essentialMissing = missing.filter(t => ['git', 'curl', 'semgrep'].includes(t));
+    if (essentialMissing.length > 0) {
+      console.log(chalk.red.bold('\n🛑 WARNING: Essential tools are missing!'));
+      console.log(chalk.red('   Analysis and recovery features may not work correctly until installed.'));
+    }
     console.log('');
   }
 

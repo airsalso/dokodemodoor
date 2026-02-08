@@ -189,6 +189,15 @@ export class VLLMProvider extends LLMProvider {
   }
 
   /**
+   * Resolve mission directory for findings, separating exploit runs when needed.
+   */
+  getMissionDir(targetDir, missionName, agentName = '') {
+    const isExploit = (agentName || '').toLowerCase().includes('exploit');
+    const safeMission = isExploit ? `${missionName}-exploit` : missionName;
+    return path.join(targetDir, 'deliverables/findings', safeMission);
+  }
+
+  /**
    * Get default todo for a specific mission and phase.
    */
   /**
@@ -305,7 +314,7 @@ export class VLLMProvider extends LLMProvider {
 
     // 1. Initial Load from Disk (Persistence)
     if (targetDir && targetDir !== '.') {
-      const missionDir = path.join(targetDir, 'deliverables/findings', missionName);
+      const missionDir = this.getMissionDir(targetDir, missionName, agentName);
       try {
         if (fs.existsSync(missionDir)) {
           const files = fs.readdirSync(missionDir);
@@ -810,7 +819,7 @@ export class VLLMProvider extends LLMProvider {
 
         if (turnCount === 1) {
           try {
-            const missionDir = path.join(targetDir, 'deliverables/findings', missionName);
+            const missionDir = this.getMissionDir(targetDir, missionName, agentName);
             if (!fs.existsSync(missionDir)) fs.mkdirSync(missionDir, { recursive: true });
             const todoPath = path.join(missionDir, 'todo.txt');
 
@@ -1155,7 +1164,7 @@ export class VLLMProvider extends LLMProvider {
                 const resultObj = typeof res.content === 'string' ? JSON.parse(res.content) : res.content;
                 const isFinished = resultObj.status === 'complete' || resultObj.status === 'success' || resultObj.isComplete;
                 if (isFinished) {
-                   const missionDir = path.join(targetDir, 'deliverables/findings', missionName);
+                   const missionDir = this.getMissionDir(targetDir, missionName, agentName);
                    if (!fs.existsSync(missionDir)) fs.mkdirSync(missionDir, { recursive: true });
                    const taskName = (tc.arguments.task || tc.arguments.input);
                    const safeTask = taskName.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 30);
@@ -1190,7 +1199,7 @@ export class VLLMProvider extends LLMProvider {
             }
 
             if (tc.name === 'TodoWrite' && tc.arguments.todo) {
-              const missionDir = path.join(targetDir, 'deliverables/findings', missionName);
+              const missionDir = this.getMissionDir(targetDir, missionName, agentName);
               if (!fs.existsSync(missionDir)) fs.mkdirSync(missionDir, { recursive: true });
               fs.writeFileSync(path.join(missionDir, 'todo.txt'), tc.arguments.todo);
               console.log(chalk.blue(`    💾 Persisted todo.txt for ${missionName}`));
@@ -1225,7 +1234,7 @@ export class VLLMProvider extends LLMProvider {
             }
 
             if (tc.name === 'open_file' && res.content && res.content.length > 3000) {
-               const missionDir = path.join(targetDir, 'deliverables/findings', missionName);
+               const missionDir = this.getMissionDir(targetDir, missionName, agentName);
                if (!fs.existsSync(missionDir)) fs.mkdirSync(missionDir, { recursive: true });
                const targetName = tc.arguments.path.split('/').pop().replace(/[^a-z0-9]/g, '_').substring(0, 30);
                const filePath = path.join(missionDir, `staged_source_${targetName}.md`);

@@ -54,33 +54,64 @@ export async function executeBash(params) {
   const agentName = (getAgentName() || '').toLowerCase();
   const webUrl = getWebUrl();
   let safeCommand = command;
+  const shellPath = fs.existsSync('/bin/bash') ? '/bin/bash' : '/bin/sh';
 
   try {
     // Normalize miswrapped JSON command payloads
     const trimmed = (safeCommand || '').trim();
-    if (trimmed.startsWith('{') && trimmed.includes('"command"')) {
+    if (trimmed.startsWith('{') && trimmed.includes('command')) {
+      let extracted = null;
       try {
         const parsed = JSON.parse(trimmed);
         if (parsed && typeof parsed.command === 'string') {
-          safeCommand = parsed.command;
+          extracted = parsed.command;
         }
       } catch (e) {
-        // Fall through and let execution fail with a clear error below
+        const match = trimmed.match(/"command"\s*:\s*"((?:\\.|[^"])*)"/);
+        if (match) {
+          extracted = match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        }
+      }
+      if (typeof extracted === 'string' && extracted.trim()) {
+        safeCommand = extracted;
       }
     }
 
     // Defensive: Strip LLM hallucinations like "command: ls" or "bash: ls" or "{command: ls}"
     if (typeof safeCommand === 'string') {
       let cleaned = safeCommand.trim();
+      const hadJsonishPrefix = /^\s*\{/.test(cleaned) || /^(command|bash|sh|sh -c)\s*:/i.test(cleaned);
       // Handle unquoted pseudo-JSON like "{command: curl ...}"
       cleaned = cleaned.replace(/^\{\s*(command|bash|sh|sh -c)\s*:\s*/i, '');
       cleaned = cleaned.replace(/^(command|bash|sh|sh -c)\s*:\s*/i, '');
       cleaned = cleaned.replace(/\}\s*$/, '');
+      if (hadJsonishPrefix || /,\s*(timeout|cwd|env|args|path)\s*::/i.test(cleaned) || /,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:/i.test(cleaned)) {
+        cleaned = cleaned.replace(/\]\s*,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:\s*.*$/i, '');
+        cleaned = cleaned.replace(/,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:\s*.*$/i, '');
+        cleaned = cleaned.replace(/\]\s*$/, '');
+      }
       safeCommand = cleaned.trim();
     }
 
     if (!safeCommand || typeof safeCommand !== 'string') {
       throw new Error('Missing bash command');
+    }
+    const workDir = params.cwd ? path.resolve(targetDir, params.cwd) : targetDir;
+    const isRoot = workDir === '/' || workDir === '/root' || workDir === '/home';
+    const heavyRootCmd = /^\s*(ls\s+-R|grep\s+-R|find\s+\/|rg\s+--files\s+\/)/i.test(safeCommand);
+    if (isRoot && heavyRootCmd) {
+      return {
+        status: 'error',
+        output: 'Blocked heavy filesystem scan at root. Scope searches to the repo root and use rg/find with narrow patterns.',
+        exitCode: 2
+      };
+    }
+    if (/^\s*\{\s*command\b/i.test(safeCommand) || /"command"\s*:/.test(safeCommand) || /,\s*"?\s*timeout\s*"?\s*:/.test(safeCommand)) {
+      return {
+        status: 'error',
+        output: 'Invalid command wrapper detected. Provide a raw shell command only (no JSON, no command: prefix).',
+        exitCode: 2
+      };
     }
 
     // Enforce target URL usage for api-fuzzer to avoid localhost drift
@@ -114,11 +145,9 @@ export async function executeBash(params) {
     const execAsync = promisify(exec);
 
     // Resolve working directory: if params.cwd is provided, resolve against targetDir
-    const workDir = params.cwd ? path.resolve(targetDir, params.cwd) : targetDir;
-
     const { stdout, stderr } = await execAsync(safeCommand, {
       cwd: workDir,
-      shell: '/bin/bash',
+      shell: shellPath,
       maxBuffer: 1024 * 1024 * 10, // 10MB buffer
       timeout: timeoutSeconds * 1000, // Timeout in milliseconds
       env: {
@@ -338,7 +367,8 @@ function registerSubAgentTools() {
           }
         } else if (alias === 'grep' || alias === 'search_file' || alias === 'rg') {
           if (p.query) {
-            const max = p.max_results || 100;
+            const parsedMax = Number.parseInt(p.max_results, 10);
+            const max = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 1000) : 100;
             const targetPath = p.path || '.';
             if (global.__DOKODEMODOOR_RG_AVAILABLE) {
               cmd = `rg -n --no-heading --color never ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;

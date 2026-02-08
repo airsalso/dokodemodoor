@@ -71,7 +71,7 @@ No single source is sufficient alone.
 
 ### 3.1 RECON 9 CLASSIFICATION RULES (MANDATORY)
 You MUST scan **all** items in the Recon section titled **Injection Source Inventory** (or anchor `## [ANCHOR:INJECTION_SOURCES]`) and classify them:
-If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: CODEI]`, treat it as the primary target list and reconcile it with the Injection Source Inventory.
+If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: CODEI]`, treat it as the primary target list and reconcile it with the Injection Source Inventory. If that exact header does **not** exist, use any CODEI‑titled section as the primary target list. If no CODEI section exists, fall back to the Injection Source Inventory and explicitly note the recon gap.
 - **Include here**: command execution, eval/Function, unsafe deserialization, expression-language injection, regex injection, CRLF/header injection, CSV/Excel formula injection, log injection, template *selection* where it leads to code exec, and other **non-DB / non-filesystem / non-template-eval** injection sources.
 - **Exclude** (handled elsewhere): SQL/NoSQL queries (SQLI), filesystem path usage (PATHI), template expression evaluation (SSTI), browser sinks (XSS), network calls/URL fetch (SSRF).
 - If an item is ambiguous, create a Todo to **disambiguate** via code tracing.
@@ -97,19 +97,29 @@ Repository Path: {{REPO_PATH}}
 
 You MUST derive initial tasks ONLY from command/code/deserialization‑relevant items:
 - `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for Command/Code/Deserialization tables/rows only.** Ignore SQLI, XSS, SSRF, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: CODEI]** section. This is your primary target list.
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: CODEI]** section. This is your primary target list. If that exact header is missing, use any CODEI‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
 - `deliverables/code_analysis_deliverable.md` → Only paths leading to execution sinks (eval, exec, etc.).
+
+**Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 
 Then expand tasks only if new command execution sinks are discovered during tracing and are network‑reachable.
 
 ### 3.5 Hard Stop & Save Rule (MANDATORY)
-- You MUST cover **all Code/Command/Deserialization‑relevant items** from the Recon Injection Source Inventory (or `## [ANCHOR:INJECTION_SOURCES]`) and any items in `## [CATEGORY: CODEI]` from the recon-verify overlay.
+- **Prioritization Rule**: Always prioritize **directly executable sinks** (shell exec, eval, deserialization) before non-exec injection surfaces (CRLF, CSV/Excel formula, log injection).
+- **Minimum Coverage Rule**: You MUST cover **all High-Risk executable sinks** from the Recon Injection Source Inventory (or `## [ANCHOR:INJECTION_SOURCES]`) and any items in `## [CATEGORY: CODEI]` from the recon-verify overlay. Lower-risk, non-exec items may be sampled or deferred if limits are reached.
 - After those are covered, you may do **up to five** additional short sweeps for missed code-exec sinks, then stop and synthesize.
 - You MUST call `save_deliverable` before ending. If you cannot save, explicitly state why and retry once.
 
 ### 3.6 Path Safety (MANDATORY)
-- Use absolute paths anchored at `{{REPO_PATH}}` for all file access (e.g., `{{REPO_PATH}}/routes/profileImageUrlUpload.ts`).
-- Do not rely on relative paths like `routes/...` or `./routes/...`.
+- **Prefer** absolute paths anchored at `{{REPO_PATH}}` for file access (e.g., `{{REPO_PATH}}/routes/profileImageUrlUpload.ts`).
+- **Allowed**: repo‑relative paths (`routes/...`, `./routes/...`) when tools return relative locations or when absolute paths fail.
+- If a path fails to open, follow the recovery steps in `_path-awareness.txt` instead of looping.
+
+### 3.7 Recon-Gap Limited Discovery (MANDATORY)
+If Recon/Recon-Verify CODEI targets are missing, inconsistent, or unverifiable:
+- You MAY perform **limited independent discovery** to find code/command execution sinks.
+- This discovery MUST stay within the **search/file caps** in §6.3.
+- If no valid execution sink is confirmed, record **"Recon gap: no confirmed CODEI sink"** and proceed to deliverables.
 
 @include(shared/_path-awareness.txt)
 
@@ -172,6 +182,10 @@ You MUST follow the auto-injected `todo.txt`. If code tracing discovers addition
 @include(shared/_analysis-efficiency-limits.txt)
 @include(shared/_analysis-stop-rules.txt)
 
+**Hard Caps**: After **12 file opens** or **8 searches**, stop discovery, record a recon gap, and proceed to deliverables.
+
+**Non-Exec Inputs**: For CRLF/CSV/Log injection items, provide only a brief impact note unless they directly enable code/command execution.
+
 ### 6.4 No Live Exploitation
 Do not execute payloads that can modify state or exfiltrate data.
 Witness payloads are **recorded only**.
@@ -205,6 +219,7 @@ For each Todo path, you MUST record:
 - **CMDI-shell-string**: user input influences a single string passed to a shell (e.g., `exec("curl " + url)`)
   - **Defense:** Avoid shell string entirely; use argv arrays + `shell:false`. If unavoidable, strict allowlist + robust escaping, but treat as high risk.
 - **CMDI-argv-argument**: user input is one argument element in an argv array with `shell:false`. **Check for Flag Injection** (e.g., input starts with `-` or `--` to change tool behavior like `-o /path/to/shell`).
+  - **Defense Addendum:** Enforce strict allowlists for dangerous flags/options even with `shell:false`.
 - **CMDI-command-name**: user input controls the executable/command selected
 - **CMDI-flag-or-option**: user input controls flags/options to a tool (e.g., `--output`, `-o`)
 - **CMDI-path-or-target**: user input controls file paths, URLs, or targets passed to tools
@@ -256,6 +271,8 @@ No speculation without labeling; when uncertain, lower confidence.
 ---
 
 ## 11) DELIVERABLES (MANDATORY)
+
+Never output an empty response. If you are unsure or blocked, provide a brief `## Summary` and proceed to deliverables.
 
 You MUST produce **TWO artifacts** via `save_deliverable`.
 

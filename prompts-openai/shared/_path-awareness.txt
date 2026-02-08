@@ -1,7 +1,7 @@
-**Path Awareness:** By default, you are working within the repository root.
+**Path Awareness:** By default, you are working within the repository root (`{{REPO_PATH}}`).
 - **Priority:** Always prefer repo-relative paths (e.g., `routes/user.ts`, `deliverables/recon_deliverable.md`).
 - **Absolute Paths:** If a tool (like `search_file` or `rg`) returns an absolute path, you MAY use it directly.
-- **Consistency:** Do not manually prepend `repos/` unless your current working directory is explicitly the project root and not the repository root.
+- **Consistency:** Do not manually prepend `repos/` unless your current working directory is explicitly the repository root.
 
 **Path Recovery Strategy (MANDATORY):**
 If a file reading tool (e.g., `open_file` or `view_file`) fails with "No such file or directory":
@@ -17,6 +17,7 @@ If a file reading tool (e.g., `open_file` or `view_file`) fails with "No such fi
 - When creating payloads, scripts, or small files, prefer the **`write_file`** tool (alias).
 - It takes `path` and `content` directly, bypassing shell quoting issues that often cause "unexpected EOF" errors.
 
-**Repo Root Anchor:** The relative path from the project root to the target repository is `{{REPO_PATH}}`.
+**Repository Root Anchor:** The repository root is `{{REPO_PATH}}`. Do not operate outside this path.
+If `{{REPO_PATH}}` is empty or unresolved, STOP and request a valid repository path.
 
 **Discovery Discipline:** Always start analysis from evidence in `deliverables/recon_deliverable.md` and `deliverables/recon_verify_deliverable.md`. Do not start broad sweeps until specified locations are exhausted.

@@ -226,8 +226,7 @@ export const PHASES = Object.freeze({
   'api-fuzzing': ['api-fuzzer'],
   'vulnerability-analysis': ['sqli-vuln', 'codei-vuln', 'ssti-vuln', 'pathi-vuln', 'xss-vuln', 'auth-vuln', 'ssrf-vuln', 'authz-vuln'],
   'exploitation': ['sqli-exploit', 'codei-exploit', 'ssti-exploit', 'pathi-exploit', 'xss-exploit', 'auth-exploit', 'ssrf-exploit', 'authz-exploit'],
-  'reporting': ['report'],
-  'osv-analysis': ['osv-analysis']
+  'reporting': ['report']
 });
 
 export const PHASE_ORDER = Object.freeze([
@@ -236,8 +235,7 @@ export const PHASE_ORDER = Object.freeze([
   'api-fuzzing',
   'vulnerability-analysis',
   'exploitation',
-  'reporting',
-  'osv-analysis'
+  'reporting'
 ]);
 
 
@@ -257,6 +255,7 @@ export const PHASE_ORDER = Object.freeze([
  * - number: phase index (1..N).
  */
 export const getPhaseIndexForAgent = (agentName) => {
+  if (agentName === 'osv-analysis') return 99; // Standalone/manual bypass
   const agent = validateAgent(agentName);
   const phaseIndex = PHASE_ORDER.indexOf(agent.phase);
 
@@ -505,6 +504,11 @@ export const cleanupStaleSessions = async (currentSessionId = null) => {
       const lastActivity = session.lastActivity ? new Date(session.lastActivity) : new Date(session.createdAt);
       if (now - lastActivity > STALE_THRESHOLD_MS) {
         session.status = 'interrupted';
+        if (Array.isArray(session.runningAgents) && session.runningAgents.length > 0) {
+          const failed = new Set([...(session.failedAgents || []), ...session.runningAgents]);
+          session.failedAgents = Array.from(failed);
+          session.runningAgents = [];
+        }
         updated = true;
         console.log(chalk.gray(`    🧹 Auto-cleaned stale session: ${id.substring(0, 8)} (marked as interrupted)`));
       }
@@ -914,6 +918,7 @@ export const getNextAgent = (session) => {
 
   // Find the next agent that hasn't been completed and has all prerequisites
   const nextAgent = Object.values(AGENTS)
+    .filter(a => a.name !== 'osv-analysis') // Exclude standalone agent from main sequence
     .sort((a, b) => a.order - b.order)
     .find(agent => {
       if (completed.has(agent.name)) return false; // Already completed
@@ -1142,12 +1147,16 @@ const getTimeAgo = (timestamp) => {
  * - object
  */
 export const getSessionStatus = (session) => {
-  const totalAgents = Object.keys(AGENTS).length;
+  // Only count agents that belong to a defined phase for the progress bar
+  const phaseAgents = new Set(Object.values(PHASES).flat());
+  const totalAgents = phaseAgents.size;
+
   const completedCount = new Set([
     ...(session.completedAgents || []),
     ...(session.skippedAgents || [])
-  ]).size;
-  const failedCount = session.failedAgents.length;
+  ].filter(name => phaseAgents.has(name))).size;
+
+  const failedCount = (session.failedAgents || []).filter(name => phaseAgents.has(name)).length;
 
   let status;
   if ((session.runningAgents || []).length > 0) {

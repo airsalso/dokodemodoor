@@ -23,17 +23,24 @@ export function validateEvidenceJson(content) {
     // [CONTROL CHARACTER DEFENSE]
     const sanitizeJSON = (s) => {
       return s.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
-        return match.replace(/[\x00-\x1F]/g, (c) => {
+        let sanitized = match.replace(/[\x00-\x1F]/g, (c) => {
           if (c === '\n') return '\\n';
           if (c === '\r') return '\\r';
           if (c === '\t') return '\\t';
           return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
         });
+        // Escape invalid backslashes inside string literals (e.g., Windows paths)
+        sanitized = sanitized.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+        return sanitized;
       });
     };
 
     const sanitizedContent = sanitizeJSON(content);
     const parsed = JSON.parse(sanitizedContent);
+
+    const MAX_BODY_LENGTH = 2000;
+    const MAX_TEXT_LENGTH = 2000;
+    const MAX_HEADERS_LENGTH = 8000;
 
     // Root validation
     if (!parsed.vulnerabilities || !Array.isArray(parsed.vulnerabilities)) {
@@ -44,8 +51,10 @@ export function validateEvidenceJson(content) {
     }
 
     if (parsed.vulnerabilities.length === 0) {
-       // Allow empty array if no vulns were successfully evidence
-       return { valid: true, data: parsed };
+      return {
+        valid: false,
+        message: `Invalid evidence structure: 'vulnerabilities' must contain at least one entry.`,
+      };
     }
 
     // Validate each vulnerability entry
@@ -105,6 +114,32 @@ export function validateEvidenceJson(content) {
           return {
             valid: false,
             message: `Evidence item at vulnerabilities[${j}].evidence[${i}] (screenshot) requires 'path' property pointing to the image.`,
+          };
+        }
+
+        if (item.type === 'http_request_response') {
+          const requestBody = typeof item.request?.body === 'string' ? item.request.body : '';
+          const responseBody = typeof item.response?.body === 'string' ? item.response.body : '';
+          const responseHeaders = item.response?.headers ? JSON.stringify(item.response.headers) : '';
+          if (requestBody.length > MAX_BODY_LENGTH || responseBody.length > MAX_BODY_LENGTH) {
+            return {
+              valid: false,
+              message: `HTTP body too large at vulnerabilities[${j}].evidence[${i}]. Limit ${MAX_BODY_LENGTH} chars.`,
+            };
+          }
+          if (responseHeaders.length > MAX_HEADERS_LENGTH) {
+            return {
+              valid: false,
+              message: `HTTP headers too large at vulnerabilities[${j}].evidence[${i}]. Limit ${MAX_HEADERS_LENGTH} chars.`,
+            };
+          }
+        }
+
+        const description = typeof item.description === 'string' ? item.description : '';
+        if (description.length > MAX_TEXT_LENGTH) {
+          return {
+            valid: false,
+            message: `Evidence description too large at vulnerabilities[${j}].evidence[${i}]. Limit ${MAX_TEXT_LENGTH} chars.`,
           };
         }
       }

@@ -17,7 +17,7 @@ Your mission is to enrich the current **Application Security Map** by performing
 ## 2. WORKING WITH FILES & NETWORK (CRITICAL)
 - **Target URL**: ALWAYS use the provided `webUrl` variable for all requests. **NEVER use `localhost` or `127.0.0.1`** unless the target URL itself is localhost.
 - **Authentication**: You have been provided with `deliverables/auth_session.json`. DO NOT attempt to login manually with `curl` or other tools. Use the cookies/tokens from this file in your fuzzing headers (e.g., `-H "Cookie: ..."` or `-H "Authorization: ..."`).
-- **Deliverables Directory**: All analysis reports and maps are located in the `deliverables/` directory relative to the project root.
+- **Deliverables Directory**: All analysis reports and maps are located in the `deliverables/` directory under `{{REPO_PATH}}`.
 - **Pathing**: ALWAYS use the prefix `deliverables/` when accessing or saving these files (e.g., `deliverables/recon_deliverable.md`).
 - **Reading Files**: Use the `open_file` tool to read existing deliverables. DO NOT use `bash` or `sed` for complex multi-line reading or editing if a structured tool is available.
 - **Do NOT edit** `deliverables/recon_deliverable.md`. It is immutable once recon is complete.
@@ -84,7 +84,7 @@ Your mission is to enrich the current **Application Security Map** by performing
 - **Goal**: This creates `api_fuzzer_deliverable.md`.
 
 ## 6. TECHNICAL CONSTRAINTS (CRITICAL)
-- **Paths**: ALWAYS use absolute paths or paths relative to the project root (e.g., `deliverables/recon_deliverable.md`).
+- **Paths**: ALWAYS use absolute paths under `{{REPO_PATH}}` or paths relative to `{{REPO_PATH}}` (e.g., `deliverables/recon_deliverable.md`).
 - **Deliverable Types**:
   - For the detailed report, use **ONLY** `"API_FUZZ_REPORT"`.
   - **NEVER** use `"CODE_ANALYSIS"` - that is for pre-recon only.

@@ -1,1 +1,2 @@
 For fast filename discovery, prefer `list_files` with a query and path (e.g., `list_files({"query":"router","path":"."})`).
+If `list_files` is unavailable, use `rg --files -g '*<pattern>*'` or `find . -name '*<pattern>*'`.

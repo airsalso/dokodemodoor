@@ -41,6 +41,8 @@ Network-reachable inputs (params/body/headers/cookies) that reach:
 - **Unsafe render APIs**: `renderString`, `compile`, `evaluate` (Pug), `compile` (Handlebars), `render` (EJS), `renderFile` (with dynamic content), `SafeString`.
 - Helpers/filters/globals callable with user-controlled arguments
 - **Second-order SSTI**: Stored input (DB/Profile/Settings) later rendered in a template. Check database save points followed by automated response/email rendering.
+  - **Engine Examples**: Jinja2 `render_template_string`, Twig `createTemplate`, Handlebars `compile` + user input, EJS `render`/`renderFile` with dynamic templates, Pug `compile`/`render` with untrusted input.
+  - **Stored → Render Later**: Explicitly trace the **save point** and the **later render point**; both must be linked to confirm reachability.
 
 ### 2.2 OUT-OF-SCOPE
 - Template **path selection only** (PATHI)
@@ -49,6 +51,8 @@ Network-reachable inputs (params/body/headers/cookies) that reach:
 - Pure command execution unless reachable *via* template execution (note but do not expand)
 
 If a render path exists only in tests, record as **“not found in production code.”**
+
+**Boundary Reminder**: SSTI is **expression evaluation** inside templates; PATHI is **template selection/path control** without expression evaluation.
 
 ---
 
@@ -65,7 +69,7 @@ No single source is sufficient alone.
 
 ### 3.1 RECON 9 CLASSIFICATION RULES (MANDATORY)
 You MUST scan **all** items in the Recon section titled **Injection Source Inventory** (or anchor `## [ANCHOR:INJECTION_SOURCES]`) and classify them:
-If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: SSTI]`, treat it as the primary target list and reconcile it with the Injection Source Inventory.
+If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: SSTI]`, treat it as the primary target list and reconcile it with the Injection Source Inventory. If that exact header does **not** exist, use any SSTI-titled section as the primary target list (e.g., `## 3. Server‑Side Template Injection (SSTI)`).
 - **Include here**: template expression evaluation, dynamic template compilation, unsafe render APIs, and user-controlled template helpers/globals.
 - **Exclude** (handled elsewhere): SQL/NoSQL queries (SQLI), filesystem path usage (PATHI), browser sinks (XSS), network calls/URL fetch (SSRF), OS command exec/deserialization/code eval (CODEI).
 - If an item is ambiguous, create a Todo to **disambiguate** via code tracing.
@@ -97,6 +101,14 @@ You MUST derive initial tasks ONLY from template‑relevant items:
 Then expand tasks only if:
 - new template render sinks are discovered during tracing, **and**
 - they are reachable from network entry points
+
+**Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
+
+### 3.5 Recon-Gap Limited Discovery (MANDATORY)
+If Recon/Recon-Verify SSTI targets are missing, inconsistent, or unverifiable:
+- You MAY perform **limited independent discovery** to find server-side template render sinks.
+- This discovery MUST stay within the **search/file caps** in §6.5–§6.6.
+- If no valid SSTI sink is confirmed, you MUST report **"Recon gap: no confirmed SSTI sink"** and still save deliverables.
 
 @include(shared/_path-awareness.txt)
 
@@ -140,6 +152,9 @@ Only report vulnerabilities that are **externally exploitable**.
 2. **Context Verification**
    - Test if user input reaches template rendering
    - Check for server-side vs client-side template evaluation
+3. **Engine Clues (No Exploit)**:
+   - Use template error messages (if any) to infer engine type
+   - Do NOT rely solely on error leakage; confirm via dependencies when possible
 
 **Example Playwright Workflow:**
 ```
@@ -161,6 +176,16 @@ You MUST follow the auto-injected `todo.txt`. If code tracing discovers addition
 ### 6.4 No Live Exploitation
 Do not execute payloads that could modify state or exfiltrate data.
 Witness payloads are **recorded only**.
+
+### 6.5 File-Scan Cap (MANDATORY)
+You may open at most **12 code/template files total** during this phase.
+- After 12 file opens, **stop scanning** and proceed to **deliverables** using the best available evidence.
+- If the Recon/Recon-Verify evidence is inconsistent or missing, **state that explicitly** and still complete deliverables.
+
+### 6.6 Search Loop Cap (MANDATORY)
+You may run at most **8 search_file** calls total.
+- If a search returns **empty output**, count it as a miss.
+- After **3 misses**, stop discovery and proceed to deliverables with a **recon inconsistency** note.
 
 ---
 
@@ -232,6 +257,7 @@ No speculation without explicit labeling.
 ## 11) DELIVERABLES (MANDATORY)
 
 You MUST produce **TWO artifacts** via `save_deliverable`.
+Even if **no SSTI is confirmed**, you MUST still save both deliverables with a clear “no confirmed SSTI” conclusion and an **empty queue**.
 
 ### 11.1 SSTI Analysis Report (Markdown) → `SSTI_ANALYSIS`
 

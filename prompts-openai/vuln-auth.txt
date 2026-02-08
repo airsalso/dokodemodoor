@@ -66,7 +66,7 @@ No single source is sufficient alone.
 
 ### 3.1 RECON 3 CLASSIFICATION RULES (MANDATORY)
 You MUST scan **all** items in the Recon section titled **Authentication & Session Management Flow** (or anchor `## [ANCHOR:AUTH_FLOW]`) and classify them:
-If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: AUTH]`, treat it as the primary target list and reconcile it with the Authentication & Session Management Flow section.
+If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: AUTH]`, treat it as the primary target list and reconcile it with the Authentication & Session Management Flow section. If that exact header does **not** exist, use any Auth‑titled section as the primary target list. If no Auth section exists, fall back to the Authentication & Session Management Flow section and explicitly note the recon gap.
 - **Include here**: login, registration, password reset, session management, OAuth/SSO flows, and MFA.
 - **Exclude** (handled elsewhere): Authorization checks (AuthZ), SQL queries (SQLI), command execution (CODEI), etc.
 - If an item is ambiguous or spans both AuthN and AuthZ, create a Todo to **disambiguate** via code tracing.
@@ -92,8 +92,10 @@ Repository Path: {{REPO_PATH}}
 
 You MUST derive all analysis targets ONLY from authentication‑relevant items:
 - `deliverables/recon_deliverable.md` → **Authentication & Session Management Flow** section. **FILTER for AuthN tables/rows only.** Ignore AuthZ, XSS, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: AUTH]** section. This is your primary target list.
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: AUTH]** section. This is your primary target list. If that exact header is missing, use any Auth‑titled section; otherwise fall back to Authentication & Session Management Flow and record a recon gap.
 - `deliverables/code_analysis_deliverable.md` → Only sections regarding AuthN (Login logic, Token handling).
+
+**Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 
 @include(shared/_path-awareness.txt)
 
@@ -126,7 +128,7 @@ Only report vulnerabilities that are **externally exploitable**.
 
 ### 6.1 Playwright Browser Automation (RECOMMENDED)
 
-**Use {{MCP_SERVER}} (Playwright) to verify authentication flows and session management in real browser environment.**
+**Use {{MCP_SERVER}} (Playwright) to verify authentication flows and session management in real browser environment only when needed.** Prefer code-first analysis; if code evidence is sufficient, you MAY skip Playwright.
 
 **Recommended Playwright Tasks for Auth Analysis:**
 
@@ -169,11 +171,15 @@ You MUST follow the auto-injected `todo.txt`. If code tracing discovers addition
 @include(shared/_analysis-efficiency-limits.txt)
 @include(shared/_analysis-stop-rules.txt)
 
+**Hard Caps**: After **12 file opens** or **8 searches**, stop discovery, record a recon gap, and proceed to deliverables.
+
 ---
 
 ## 7) AUTHENTICATION ANALYSIS METHODOLOGY (CANONICAL)
 
 You MUST render a verdict (vulnerable / safe / not found) for **each category below**.
+If evidence is insufficient, mark **“Unconfirmed / Needs Recheck”**, note the missing evidence, and continue without stalling.
+**Small-Scope Efficiency**: If Auth flows are limited to a single controller + helper, open only those core files and proceed to verdicts.
 
 ### 7.1 Transport & Caching
 - Enforce HTTPS only
@@ -198,6 +204,7 @@ You MUST render a verdict (vulnerable / safe / not found) for **each category be
 - Session ID rotation on login
 - Server-side invalidation on logout
 - Idle + absolute expiration
+ - **Bearer/OAuth-only services**: If the app uses **no cookies** and relies solely on bearer tokens, skip cookie-specific checks and focus on token lifecycle and storage controls.
 
 **Failure →** `Session_Management_Flaw`
 
@@ -208,6 +215,7 @@ You MUST render a verdict (vulnerable / safe / not found) for **each category be
 - Expiration & invalidation
 - Not logged or exposed in URLs
 - **JWT Deep Dive**: Verify signing algorithm (check for `alg: none` or HS256/RS256 confusion), audit signing secret strength, and validate critical claims (`exp`, `iat`, `nbf`, `aud`, `iss`).
+ - **Opaque Tokens**: If the token is opaque (not JWT), skip JWT-specific checks and instead verify server-side session storage, rotation, and invalidation behavior.
 
 **Failure →** `Token_Management_Issue`
 
@@ -272,6 +280,9 @@ No speculation without explicit labeling.
 ---
 
 ## 9) DELIVERABLES (MANDATORY)
+
+Never output an empty response. If you are unsure or blocked, provide a brief `## Summary` and proceed to deliverables.
+You MUST call `save_deliverable` before ending. If you cannot save, explicitly state why and retry once.
 
 You MUST produce **TWO artifacts**.
 

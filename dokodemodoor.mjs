@@ -68,8 +68,21 @@ process.on('SIGINT', async () => {
 
   if (activeSessionId) {
     try {
-      // Mark session as interrupted if it was active
-      await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
+      // Mark session as interrupted and move running agents to failed for crash-safe state
+      const session = await getSession(activeSessionId);
+      if (session) {
+        const runningAgents = session.runningAgents || [];
+        const failedAgents = new Set([...(session.failedAgents || []), ...runningAgents]);
+        await updateSession(activeSessionId, {
+          status: 'interrupted',
+          lastActivity: getLocalISOString(),
+          runningAgents: [],
+          failedAgents: Array.from(failedAgents)
+        });
+      } else {
+        // Fallback: mark session as interrupted if we cannot load it
+        await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
+      }
       console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as interrupted`));
     } catch (e) {
       // Ignore errors during exit cleanup
@@ -96,7 +109,19 @@ process.on('SIGTERM', async () => {
 
   if (activeSessionId) {
     try {
-      await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
+      const session = await getSession(activeSessionId);
+      if (session) {
+        const runningAgents = session.runningAgents || [];
+        const failedAgents = new Set([...(session.failedAgents || []), ...runningAgents]);
+        await updateSession(activeSessionId, {
+          status: 'interrupted',
+          lastActivity: getLocalISOString(),
+          runningAgents: [],
+          failedAgents: Array.from(failedAgents)
+        });
+      } else {
+        await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
+      }
     } catch (e) {
       // Ignore
     }
@@ -414,22 +439,6 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     console.log(chalk.cyan(`\n💡 To generate Korean translation, run: npm run translate-report`));
   }
 
-  // PHASE 7: OSV ANALYSIS
-  // You can enable/disable this via DOKODEMODOOR_SKIP_OSV_SCAN in .env (default: true)
-  const isOsvEnabled = process.env.DOKODEMODOOR_SKIP_OSV_SCAN !== 'true';
-
-  if (startPhase <= 7 && isOsvEnabled) {
-    console.log(chalk.cyan.bold('\n🔍 PHASE 7: OPEN SOURCE VULNERABILITY ANALYSIS'));
-    const osvTimer = new Timer('phase-7-osv-analysis');
-
-    // Load OSV phase logic
-    const { executeOsvAnalysisPhase } = await import('./src/phases/osv-analysis.js');
-    await executeOsvAnalysisPhase(session, runAgentPromptWithRetry, loadPrompt);
-
-    const osvDuration = osvTimer.stop();
-    timingResults.phases['osv-analysis'] = osvDuration;
-    console.log(chalk.green(`✅ OSV analysis phase complete in ${formatDuration(osvDuration)}`));
-  }
 
 
 

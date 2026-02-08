@@ -64,7 +64,7 @@ No single source is sufficient alone.
 
 ### 3.1 RECON 9 CLASSIFICATION RULES (MANDATORY)
 You MUST scan **all** items in the Recon section titled **Injection Source Inventory** (or anchor `## [ANCHOR:INJECTION_SOURCES]`) and classify them:
-If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: SQLI]`, treat it as the primary target list and reconcile it with the Injection Source Inventory.
+If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: SQLI]`, treat it as the primary target list and reconcile it with the Injection Source Inventory. If that exact header does **not** exist, use any SQLI‑titled section as the primary target list. If no SQLI section exists, fall back to the Injection Source Inventory and explicitly note the recon gap.
 - **Include here**: SQL/NoSQL query construction, ORM raw fragments, dynamic where/order/limit, `$where`/regex/aggregation stages.
 - **Exclude** (handled elsewhere): filesystem path usage (PATHI), template rendering/evaluation (SSTI), browser sinks (XSS), network calls/URL fetch (SSRF), OS command exec/deserialization/code eval (CODEI).
 - If an item is ambiguous, create a Todo to **disambiguate** via code tracing.
@@ -90,12 +90,21 @@ Repository Path: {{REPO_PATH}}
 
 You MUST derive initial tasks ONLY from SQL/NoSQL‑relevant items:
 - `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for SQL/NoSQL tables/rows only.** Ignore XSS, SSRF, CODEI, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: SQLI]** section. This is your primary target list.
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: SQLI]** section. This is your primary target list. If that exact header is missing, use any SQLI‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
 - `deliverables/code_analysis_deliverable.md` → Only paths leading to DB sinks.
+
+**Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 
 Then expand tasks only if:
 - new DB sinks are discovered during tracing, and
 - they are reachable from network entry points
+
+### 3.5 Recon-Gap Limited Discovery (MANDATORY)
+If Recon/Recon-Verify SQLI targets are missing, inconsistent, or unverifiable:
+- You MAY perform **limited independent discovery** to find DB query sinks.
+- This discovery MUST stay within the **search/file caps** in §6.3.
+- If no valid SQL/NoSQL sink is confirmed, record **"Recon gap: no confirmed SQL/NoSQL sink"** and proceed to deliverables.
+ - Do NOT mark paths as safe without confirmed sinks; use **Unconfirmed/Needs Recheck** when evidence is insufficient.
 
 @include(shared/_path-awareness.txt)
 
@@ -160,6 +169,8 @@ You MUST follow the auto-injected `todo.txt`. If code tracing discovers addition
 @include(shared/_analysis-efficiency-limits.txt)
 @include(shared/_analysis-stop-rules.txt)
 
+**Hard Caps**: After **12 file opens** or **8 searches**, stop discovery, record a recon gap, and proceed to deliverables.
+
 ### 6.4 No Live Exploitation
 Do not run payloads that could extract data or modify state.
 Witness payloads are **recorded only**.
@@ -171,6 +182,8 @@ Witness payloads are **recorded only**.
 For each Todo path, you MUST record:
 
 0. **DB Fingerprinting**: Identify RDBMS type (PostgreSQL, MySQL, SQLite, etc.) via `package.json`, `docker-compose.yml`, or database drivers.
+   - **If unknown**: infer from ORM/driver usage (e.g., Sequelize + `pg` → Postgres, Prisma + `mysql2` → MySQL, Knex + `sqlite3` → SQLite). If still unclear, label as **Unknown DB** and proceed with conservative payloads.
+   - **Unknown DB Payloads**: Avoid time-based payloads; use benign markers and focus on code-level proof over runtime effects.
 1. **Source**: exact input (param/header/body) + file:line
 2. **Transform Chain**: each hop from controller to DAL, with file:line
 3. **Sanitization Observed**: ordered list (bind, cast, whitelist, escaping) + file:line
@@ -202,6 +215,24 @@ For each Todo path, you MUST record:
 - Regex escaping for value slots (e.g., `replace(/'/g, "''")`)
 - Client-side validation
 - “We use ORM” claims without examining raw fragments and unsafe helpers
+
+### 8.4 Query Builder Patterns (GUIDANCE)
+**Potentially Safe Patterns**
+- Strict allowlists for `orderBy`/`sort` fields (enums), mapped to fixed column names
+- Parameter binding for values (no string concatenation)
+- Query builder APIs that pass values via placeholders (e.g., `where({ id })`)
+
+**High-Risk Patterns**
+- String concatenation into `where`, `orderBy`, `limit`, or raw fragments
+- User-controlled `order` / `sort` / `column` fields without allowlists
+- Dynamic filters that accept raw operators (`$ne`, `$gt`, `$regex`) from user input
+- “OR mapper” / flexible filter objects passed directly into ORM without schema validation
+
+**ORM Raw/Unsafe Helpers (RED FLAGS)**
+- Sequelize: `literal`, `sequelize.query`, `Sequelize.literal`, raw `where` strings
+- Prisma: `$queryRawUnsafe`, `$executeRawUnsafe`, string interpolation into `$queryRaw`
+- TypeORM: `createQueryBuilder().where("...")` with string concat, `query()`
+- Knex: `.raw()` with concatenated input
 
 ---
 
@@ -235,6 +266,9 @@ No speculation without labeling; when uncertain, lower confidence.
 ---
 
 ## 11) DELIVERABLES (MANDATORY)
+
+Never output an empty response. If you are unsure or blocked, provide a brief `## Summary` and proceed to deliverables.
+You MUST call `save_deliverable` before ending. If you cannot save, explicitly state why and retry once.
 
 You MUST produce **TWO artifacts** via `save_deliverable`.
 

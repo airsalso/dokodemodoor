@@ -9,9 +9,16 @@
    - DO NOT report Code/Command Injection (CODEI).
    - DO NOT report Template Injection (SSTI).
    - DO NOT report Authentication failures (AuthN) like cookie flags or password policy.
-3. **NO TABLE SUMMARIZATION**: DO NOT summarize "Endpoint Inventory" tables or "General Reconnaissance" sections. These are already documented in the Recon deliverable. Your report must ONLY contain deep analysis of your specific target category.
-4. **REPORT TITLE RESTRICTION**: Your report title MUST reflect your category (e.g., "[Category] Security Analysis"). DO NOT use generic titles like "Security Assessment Report" or "Final Report".
-5. **RECON DATA HYGIENE**: Even if the `recon_deliverable.md` contains findings from other categories, you MUST filter them out. Use the recon file ONLY to discover your specific targets (e.g., for AuthZ, only use "Authorization Vulnerability Candidates").
-6. **NO SYNTHESIS**: Do not attempt to summarize the entire project's security posture. Focus exclusively on the technical depth of your assigned domain.
+3. **LIMITED CROSS-CATEGORY CONTEXT (EXCEPTION)**:
+   - You MAY include **1–2 lines of contextual cause** if another category is the **direct mechanism** enabling your finding.
+   - This context must NOT become a separate finding; it is only to explain exploitability or root cause.
+   - **Allowed pairs (only if directly causal):**
+     - AuthZ ⟷ AuthN (e.g., weak AuthN enabling AuthZ bypass context)
+     - SSTI ⟷ CODEI (template execution leading to code execution context)
+     - PATHI ⟷ SSRF (URL-like path loaders or filesystem loaders in SSRF flows)
+4. **NO TABLE SUMMARIZATION**: DO NOT summarize "Endpoint Inventory" tables or "General Reconnaissance" sections. These are already documented in the Recon deliverable. Your report must ONLY contain deep analysis of your specific target category.
+5. **REPORT TITLE RESTRICTION**: Your report title MUST reflect your category (e.g., "[Category] Security Analysis"). DO NOT use generic titles like "Security Assessment Report" or "Final Report".
+6. **RECON DATA HYGIENE**: Even if the `recon_deliverable.md` contains findings from other categories, you MUST filter them out. Use the recon file ONLY to discover your specific targets (e.g., for AuthZ, only use "Authorization Vulnerability Candidates").
+7. **NO SYNTHESIS**: Do not attempt to summarize the entire project's security posture. Focus exclusively on the technical depth of your assigned domain.
 
 **VIOLATION WARNING**: Including findings from other categories or summarizing general inventories leads to redundant reports and is considered a failure of specialist discipline.

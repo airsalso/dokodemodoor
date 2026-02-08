@@ -44,6 +44,7 @@ Network-reachable inputs (params/body/headers/cookies/storage) that reach:
 - Client-side DOM sinks (`innerHTML`, `outerHTML`, `document.write`, `insertAdjacentHTML`)
 - Framework escape hatches (`dangerouslySetInnerHTML`, `v-html`, `ng-bind-html`)
 - **DOM Sources**: `location.hash`, `location.search`, `window.name`, `document.referrer`, `localStorage`, `sessionStorage`, `PostMessage` events.
+  - **Rendering Context Split**: Distinguish **server-rendered HTML** from **client-rendered SPA views** when tracing sources to sinks.
 
 ### 2.2 OUT-OF-SCOPE
 - Self-XSS requiring user cooperation
@@ -68,7 +69,7 @@ No single source is sufficient alone.
 
 ### 3.1 RECON 9 CLASSIFICATION RULES (MANDATORY)
 You MUST scan **all** items in the Recon section titled **Injection Source Inventory** (or anchor `## [ANCHOR:INJECTION_SOURCES]`) and classify them:
-If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: XSS]`, treat it as the primary target list and reconcile it with the Injection Source Inventory.
+If `deliverables/recon_verify_deliverable.md` contains `## [CATEGORY: XSS]`, treat it as the primary target list and reconcile it with the Injection Source Inventory. If that exact header does **not** exist, use any XSS‑titled section as the primary target list. If no XSS section exists, fall back to the Injection Source Inventory and explicitly note the recon gap.
 - **Include here**: HTML rendering, DOM sinks, template rendering (where it results in XSS), client-side routing sinks, and browser-interpreted data locations.
 - **Exclude** (handled elsewhere): SQL/NoSQL queries (SQLI), filesystem path usage (PATHI), template expression evaluation (SSTI - though often overlaps), OS command exec/deserialization/code eval (CODEI), network calls/URL fetch (SSRF).
 - If an item is ambiguous, create a Todo to **disambiguate** via code tracing.
@@ -94,8 +95,10 @@ Repository Path: {{REPO_PATH}}
 
 You MUST derive initial tasks ONLY from XSS‑relevant items:
 - `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for XSS/DOM/HTML tables/rows only.** Ignore SQLI, SSRF, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: XSS]** section. This is your primary target list.
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: XSS]** section. This is your primary target list. If that exact header is missing, use any XSS‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
 - `deliverables/code_analysis_deliverable.md` → Only paths leading to DOM/HTML sinks.
+
+**Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 
 Then expand tasks only if:
 - new DOM sinks are discovered during tracing, **and**
@@ -129,9 +132,9 @@ Only report vulnerabilities that are **externally exploitable in a victim’s br
 
 ## 6) EXECUTION MODEL (ANTI-LOOP CONTRACT)
 
-### 6.1 Playwright Browser Automation (RECOMMENDED)
+### 6.1 Playwright Browser Automation (OPTIONAL)
 
-**Use {{MCP_SERVER}} (Playwright) to verify XSS execution context and CSP behavior in real browser environment.**
+**Use {{MCP_SERVER}} (Playwright) if needed to verify XSS execution context and CSP behavior in a real browser environment.**
 
 **Recommended Playwright Tasks for XSS Analysis:**
 
@@ -171,10 +174,12 @@ Only report vulnerabilities that are **externally exploitable in a victim’s br
 6. {{MCP_SERVER}}__browser_console_messages → Check for CSP violations
 ```
 
-**IMPORTANT**: Playwright verification is OPTIONAL but highly recommended for:
+**IMPORTANT**: Playwright verification is OPTIONAL. Prefer code‑first analysis. If you do use Playwright:
 - Confirming XSS execution context in real browser
 - Validating CSP bypass possibilities
 - Testing framework-specific rendering behavior
+**Cap**: maximum **2 Playwright attempts per endpoint**, and **no more than 6 total** per session.
+**Exception**: If evidence remains insufficient after code‑first analysis, you MAY perform **one additional focused Playwright attempt** for a high‑risk sink, and document why it was needed.
 
 ---
 
@@ -184,6 +189,8 @@ You MUST follow the auto-injected `todo.txt`. If code tracing discovers addition
 ### 6.3 Execution Control & Stop Rules (MANDATORY)
 @include(shared/_analysis-efficiency-limits.txt)
 @include(shared/_analysis-stop-rules.txt)
+
+**Hard Caps**: After **12 file opens** or **8 searches**, stop discovery, record a recon gap, and proceed to deliverables.
 
 **PRAGMATIC COMPLETION**: If analysis limits are reached, proceed to deliverables based on proven high-risk findings without stalling.
 
@@ -200,6 +207,14 @@ You MUST use **backward taint analysis**:
 5. **Sanitization Audit**: If a library (e.g., DOMPurify, sanitize-html) is used, audit its **configuration**. Check for `ALLOW_UNKNOWN`, `ADD_TAGS`, or insecurely configured whitelists.
 6. Classify as Reflected / Stored / DOM-based
 
+### SPA Routing & Render Chain (GUIDANCE)
+For SPA targets:
+- Trace **route changes** to the component or view that renders the data.
+- Map the **API response → state/store → view binding** chain.
+- Identify where user input crosses from network response into DOM sinks.
+For server-rendered flows:
+- Trace **request → template render → HTML output** and verify encoding at the render boundary.
+
 ---
 
 ## 8) RENDER CONTEXTS & DEFENSE MATCHING (MANDATORY)
@@ -211,6 +226,8 @@ You MUST use **backward taint analysis**:
 | JAVASCRIPT_STRING    | JavaScript string escaping                 |
 | URL_PARAM            | URL encoding + scheme validation           |
 | CSS_VALUE            | CSS encoding                               |
+
+**Mixed Context Examples**: event handler attributes (`onclick`), URL schemes in `href/src`, and inline `style` attributes require context-specific encoding and scheme validation.
 
 ### What does NOT count as a defense
 - HTML encoding inside JavaScript strings
@@ -246,6 +263,9 @@ Every vulnerable finding MUST include:
 ---
 
 ## 11) DELIVERABLES (MANDATORY)
+
+Never output an empty response. If you are unsure or blocked, provide a brief `## Summary` and proceed to deliverables.
+You MUST call `save_deliverable` before ending. If you cannot save, explicitly state why and retry once.
 
 You MUST produce **TWO artifacts** via `save_deliverable`.
 

@@ -137,7 +137,97 @@ export async function saveDeliverable(args) {
 
     // Validate evidence JSON if applicable
     if (isEvidenceType(deliverable_type)) {
-      const evidenceValidation = validateEvidenceJson(content);
+      // Best-effort body truncation before parsing to avoid JSON escape failures
+      const stripBodyFields = (raw) => {
+        const bodyRegex = /"body"\s*:\s*"((?:\\.|[^"\\])*)"/g;
+        return raw.replace(bodyRegex, '"body":"[omitted]"');
+      };
+
+      const autoCloseJson = (raw) => {
+        let inString = false;
+        let escaped = false;
+        const stack = [];
+        for (let i = 0; i < raw.length; i++) {
+          const ch = raw[i];
+          if (inString) {
+            if (escaped) {
+              escaped = false;
+            } else if (ch === '\\') {
+              escaped = true;
+            } else if (ch === '"') {
+              inString = false;
+            }
+            continue;
+          }
+
+          if (ch === '"') {
+            inString = true;
+            continue;
+          }
+          if (ch === '{' || ch === '[') {
+            stack.push(ch);
+            continue;
+          }
+          if (ch === '}' || ch === ']') {
+            const expected = ch === '}' ? '{' : '[';
+            if (stack.length && stack[stack.length - 1] === expected) {
+              stack.pop();
+            }
+          }
+        }
+
+        if (inString) {
+          return raw; // cannot safely auto-close if string literal is unterminated
+        }
+
+        let out = raw.trimEnd();
+        while (stack.length) {
+          const open = stack.pop();
+          out += open === '{' ? '}' : ']';
+        }
+        return out;
+      };
+
+      finalContent = autoCloseJson(stripBodyFields(finalContent));
+
+      const normalizeEvidenceJson = (raw) => {
+        const parsed = JSON.parse(raw);
+        if (!parsed?.vulnerabilities || !Array.isArray(parsed.vulnerabilities)) return raw;
+
+        for (const vuln of parsed.vulnerabilities) {
+          if (!Array.isArray(vuln.evidence)) continue;
+          for (const item of vuln.evidence) {
+            if (item?.type === 'http_request_response') {
+              if (item.request && typeof item.request.body === 'string' && item.request.body.length > 2000) {
+                item.request.body = item.request.body.slice(0, 2000) + '... [truncated]';
+              }
+              if (item.response && typeof item.response.body === 'string' && item.response.body.length > 2000) {
+                item.response.body = item.response.body.slice(0, 2000) + '... [truncated]';
+              }
+              if (item.response && item.response.headers) {
+                const headerStr = JSON.stringify(item.response.headers);
+                if (headerStr.length > 8000) {
+                  item.response.headers = { note: 'headers truncated; too large' };
+                }
+              }
+            }
+            if (typeof item?.description === 'string' && item.description.length > 2000) {
+              item.description = item.description.slice(0, 2000) + '... [truncated]';
+            }
+          }
+        }
+
+        return JSON.stringify(parsed);
+      };
+
+      try {
+        finalContent = normalizeEvidenceJson(finalContent);
+      } catch (e) {
+        // If normalization fails, keep original content so validator can report the error
+        finalContent = content;
+      }
+
+      const evidenceValidation = validateEvidenceJson(finalContent);
       if (!evidenceValidation.valid) {
         const errorResponse = createValidationError(
           evidenceValidation.message,
@@ -148,6 +238,41 @@ export async function saveDeliverable(args) {
           }
         );
         return createToolResult(errorResponse);
+      }
+
+      // Enforce screenshot evidence file existence to prevent hallucinated artifacts
+      const parsedEvidence = evidenceValidation.data;
+      const screenshotBaseDir = join(deliverablesDir, 'screenshots');
+      for (let j = 0; j < parsedEvidence.vulnerabilities.length; j++) {
+        const vuln = parsedEvidence.vulnerabilities[j];
+        for (let i = 0; i < vuln.evidence.length; i++) {
+          const item = vuln.evidence[i];
+          if (item.type !== 'screenshot') continue;
+
+          const rawPath = item.path;
+          const candidates = [];
+          if (rawPath && typeof rawPath === 'string') {
+            if (rawPath.startsWith('/')) {
+              candidates.push(rawPath);
+            } else {
+              candidates.push(join(deliverablesDir, rawPath));
+              candidates.push(join(screenshotBaseDir, rawPath));
+            }
+          }
+
+          const exists = candidates.some((p) => existsSync(p));
+          if (!exists) {
+            const errorResponse = createValidationError(
+              `Screenshot file not found at vulnerabilities[${j}].evidence[${i}]: '${rawPath}'. Checked: ${candidates.join(', ') || 'no paths'}`,
+              true,
+              {
+                deliverableType: deliverable_type,
+                expectedFormat: '{"vulnerability_id": "...", "evidence": [...], "reproduction_steps": [...]}',
+              }
+            );
+            return createToolResult(errorResponse);
+          }
+        }
       }
     }
 

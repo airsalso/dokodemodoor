@@ -1099,21 +1099,34 @@ async function captureExploitScreenshot(agentName, sourceDir, playwrightMcpName)
 
     console.log(chalk.gray(`    📸 Saving screenshot to: ${screenshotPath}`));
 
-    // Call browser_screenshot tool via MCP
-    const response = await proxy.callTool('browser_screenshot', {});
+    // Call screenshot tool via MCP (newer name first, legacy fallback)
+    let response;
+    try {
+      response = await proxy.callTool('browser_take_screenshot', {});
+    } catch (err) {
+      response = await proxy.callTool('browser_screenshot', {});
+    }
 
-    if (response && response.content && response.content[0] && response.content[0].data) {
-      const base64Data = response.content[0].data;
+    const content = response?.content || [];
+    const imageBlock = content.find((block) => block?.data && (block.type === 'image' || block.type === 'binary' || block.type === 'image/png'));
+    let base64Data = imageBlock?.data;
+
+    if (!base64Data) {
+      const textBlock = content.find((block) => typeof block?.text === 'string');
+      const text = textBlock?.text || '';
+      if (text.startsWith('data:image/')) {
+        base64Data = text.split(',')[1];
+      } else if (/^[A-Za-z0-9+/=]+$/.test(text) && text.length > 1000) {
+        base64Data = text;
+      }
+    }
+
+    if (base64Data) {
       fs.writeFileSync(screenshotPath, Buffer.from(base64Data, 'base64'));
       console.log(chalk.green(`    ✅ Screenshot saved: ${path.basename(screenshotPath)}`));
     } else {
-       // Fallback: try to see if it returned a simple base64 string or error
-       const result = response.content?.[0]?.text || JSON.stringify(response);
-       if (result.startsWith('Error')) {
-         console.log(chalk.yellow(`    ⚠️  MCP reported error: ${result}`));
-       } else {
-         console.log(chalk.yellow(`    ⚠️  Unexpected screenshot response format. Content blocks: ${response.content?.length || 0}`));
-       }
+      const summary = content.map((block) => block?.type || 'text').join(', ');
+      console.log(chalk.yellow(`    ⚠️  Unexpected screenshot response format. Content blocks: ${summary || 'none'}`));
     }
   } catch (err) {
     console.log(chalk.yellow(`    ⚠️  Screenshot capture failed: ${err.message}`));

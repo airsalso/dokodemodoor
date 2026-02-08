@@ -2,8 +2,11 @@
 - **NO-DUPLICATION**: Do not search for the same keyword or Sink in the same directory more than twice. Check your history before searching.
 - After 3 failed attempts to locate a pattern → mark **not found in production** and move on
 - **RECON-TRUST**: Trust the paths and endpoints provided in your context. Do NOT use `ls` or `cat` just to verify existence. Proceed directly to analysis/testing.
+  - **Exception**: If recon is missing, inconsistent, or clearly insufficient, you MAY perform **limited independent discovery** within the search/file caps.
 - **DIRECT-HIT**: Use targeted multi-keyword searches (e.g., `search_file query: "sink condition"`) instead of broad keyword searches.
-- **IGNORE-ARTIFACTS**: Never search or read files in `audit-logs/`, `deliverables/`, `reports/`, `node_modules/`, or any `*.log`, `*.bak`, `*.tmp`, `*.json` (if in root) files. These are external to the attack surface.
+- **IGNORE-ARTIFACTS**: Never search or read files in `audit-logs/`, `reports/`, `node_modules/`, or any `*.log`, `*.bak`, `*.tmp`, `*.json` (if in root) files. These are external to the attack surface.
+  - **Exception**: You MAY read **only** the specific deliverables explicitly required by your prompt (e.g., `deliverables/recon_deliverable.md`, `deliverables/recon_verify_deliverable.md`, `deliverables/code_analysis_deliverable.md`, `deliverables/findings/*`).
+  - **Deliverables Discipline**: Open deliverables **only when explicitly needed** and only the **exact file(s)** named by your prompt. Do **NOT** search or scan deliverables broadly.
 - **NO-REDUNDANCY**: If you have already analyzed a file and found no vulnerability, do not open it again.
 - **FOCUS-ON-EXPLOITABLE**: Prioritize sinks that are reachable from the network (as identified in recon). Skip background tasks or internal-only utilities.
 - **BASH-PRECISION (CRITICAL)**: When using `bash` or `run_command` tools, the command string (e.g., `command` or `CommandLine` argument) MUST be a **plain shell string**.

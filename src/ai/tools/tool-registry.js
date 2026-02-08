@@ -348,7 +348,7 @@ export async function registerMCPTools() {
   );
 
   // Common aliases for main agent as well
-  const bashAliases = ['run_command', 'grep', 'search_file', 'open_file', 'read_file', 'browse_file', 'view_file', 'ls', 'find', 'list_files', 'rg', 'write_file', 'save_file'];
+  const bashAliases = ['run_command', 'grep', 'search_file', 'open_file', 'read_file', 'browse_file', 'view_file', 'ls', 'find', 'rg', 'write_file', 'save_file'];
   for (const alias of bashAliases) {
     toolRegistry.register(
       alias,
@@ -366,13 +366,39 @@ export async function registerMCPTools() {
       async (p) => {
         let cmd = p.command;
 
-        // Defensive: Strip LLM hallucinations like "command: ls" or "bash: ls" or "{command: ls}"
+        // Defensive: Strip LLM hallucinations and unwrap JSON-wrapped commands.
         if (typeof cmd === 'string') {
           let cleaned = cmd.trim();
+          const hadJsonishPrefix = /^\s*\{/.test(cleaned) || /^(command|bash|sh|sh -c)\s*:/i.test(cleaned);
+
+          // If the command itself is a JSON string like {"command":"curl ...","cwd":"..."}
+          if (cleaned.startsWith('{') && cleaned.includes('command')) {
+            let extracted = null;
+            try {
+              const parsed = JSON.parse(cleaned);
+              if (parsed && typeof parsed.command === 'string') {
+                extracted = parsed.command;
+              }
+            } catch (e) {
+              const match = cleaned.match(/"command"\s*:\s*"((?:\\.|[^"])*)"/);
+              if (match) {
+                extracted = match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+              }
+            }
+            if (typeof extracted === 'string' && extracted.trim()) {
+              cleaned = extracted;
+            }
+          }
+
           // Handle unquoted pseudo-JSON like "{command: curl ...}"
           cleaned = cleaned.replace(/^\{\s*(command|bash|sh|sh -c)\s*:\s*/i, '');
           cleaned = cleaned.replace(/^(command|bash|sh|sh -c)\s*:\s*/i, '');
           cleaned = cleaned.replace(/\}\s*$/, '');
+          if (hadJsonishPrefix || /,\s*(timeout|cwd|env|args|path)\s*::/i.test(cleaned) || /,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:/i.test(cleaned)) {
+            cleaned = cleaned.replace(/\]\s*,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:\s*.*$/i, '');
+            cleaned = cleaned.replace(/,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:\s*.*$/i, '');
+            cleaned = cleaned.replace(/\]\s*$/, '');
+          }
           cmd = cleaned.trim();
         }
 
@@ -490,7 +516,8 @@ export async function registerMCPTools() {
           }
         } else if (alias === 'grep' || alias === 'search_file' || alias === 'rg') {
           if (p.query) {
-            const max = p.max_results || 100;
+            const parsedMax = Number.parseInt(p.max_results, 10);
+            const max = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 1000) : 100;
             const targetPath = p.path || '.';
 
             // Smart query: if multiple words are provided, create a regex that matches lines containing all of them
@@ -600,10 +627,35 @@ export async function registerMCPTools() {
         }
 
         if (!cmd) return { status: 'error', message: 'Missing command, path, or query' };
+        const workDir = p.cwd || '';
+        const isRoot = workDir === '/' || workDir === '/root' || workDir === '/home';
+        const heavyRootCmd = /^\s*(ls\s+-R|grep\s+-R|find\s+\/|rg\s+--files\s+\/)/i.test(cmd);
+        if (isRoot && heavyRootCmd) {
+          return {
+            status: 'error',
+            message: 'Blocked heavy filesystem scan at root. Scope searches to the repo root and use rg/find with narrow patterns.'
+          };
+        }
+        if (/^\s*\{\s*command\b/i.test(cmd) || /"command"\s*:/.test(cmd) || /,\s*"?\s*timeout\s*"?\s*:/.test(cmd)) {
+          return {
+            status: 'error',
+            message: 'Invalid command wrapper detected. Provide a raw shell command only (no JSON, no command: prefix).'
+          };
+        }
         return executeBash({ command: cmd });
       }
     );
   }
+
+  // Import and register list_files tool
+  const listFilesModule = await import('../../../mcp-server/src/tools/list-files.js');
+  const { ListFilesInputSchema, listFiles } = listFilesModule;
+  toolRegistry.register(
+    'list_files',
+    'List files under a path with optional substring filtering.',
+    ListFilesInputSchema,
+    listFiles
+  );
 
   console.log(`✓ Registered ${toolRegistry.tools.size} local MCP tools`);
 }
