@@ -58,6 +58,24 @@ If a sink exists only in test code, record as **“not found in production code.
 
 ## 3) INPUT DEPENDENCIES (MANDATORY)
 
+### 3.X XSS QUICK MAP (FOCUS ONLY)
+- **High-signal sinks**: DOM sinks, template renders, unsafe interpolation, CSP-sensitive contexts.
+- **Primary files**: Use File:Line references from recon/recon-verify (do NOT hardcode paths).
+- **Known risky patterns**: unquoted attributes, missing sanitization/escaping, unsafe HTML insertion.
+- **Full context**: Read `deliverables/recon_deliverable.md` only as needed. Do NOT paste or re-summarize the full recon report.
+
+### 3.X XSS PATTERN QUICK REF
+| Pattern | Risk | Example |
+|---|---|---|
+| DOM sink with user input | High | `el.innerHTML = userInput` |
+| Template render without escape | High | `res.render('view', { q })` |
+| Attribute injection | Medium | `<img src={{user}}>` |
+| Sanitizer used correctly | Lower | `sanitizeHtml(userInput)` |
+
+### 3.X DELIVERABLES (TOP PRIORITY)
+- You MUST save **XSS_ANALYSIS** and **XSS_QUEUE** via `save_deliverable`.
+- Do NOT proceed to summary/closure until both are saved.
+
 ### 3.0 Execution Model
 
 You correlate findings from three sources:

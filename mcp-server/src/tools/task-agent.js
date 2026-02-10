@@ -19,187 +19,20 @@ import chalk from 'chalk';
 import path from 'node:path';
 import fs from 'node:fs';
 
+// Import tool handlers for sub-agent parity
+import { listFiles, ListFilesInputSchema } from './list-files.js';
+import { readFile, ReadFileInputSchema } from './read-file.js';
+import { searchFiles, SearchFileInputSchema } from './search-tools.js';
+import { executeBash, BashInputSchema } from './bash-tools.js';
+
 export const TaskAgentInputSchema = z.object({
   task: z.string().describe('Name/description of the specialized agent to create'),
   input: z.string().describe('The specific task or question to ask the specialized agent')
 });
 
-/**
- * Bash tool for sub-agents
- * Allows executing shell commands in the target directory
- */
-export const BashToolSchema = z.object({
-  command: z.string().describe('The bash command to execute'),
-  cwd: z.string().optional().describe('The working directory relative to the project root')
-});
 
-/**
- * [목적] 서브 에이전트용 bash 명령 실행.
- *
- * [호출자]
- * - registerSubAgentTools()로 등록된 bash/Bash/alias 도구
- *
- * [출력 대상]
- * - 표준화된 실행 결과 객체 반환
- *
- * [입력 파라미터]
- * - params.command (string)
- *
- * [반환값]
- * - Promise<object>
- */
-export async function executeBash(params) {
-  let { command } = params;
-  const targetDir = getTargetDir();
-  const agentName = (getAgentName() || '').toLowerCase();
-  const webUrl = getWebUrl();
-  let safeCommand = command;
-  const shellPath = fs.existsSync('/bin/bash') ? '/bin/bash' : '/bin/sh';
 
-  try {
-    // Normalize miswrapped JSON command payloads
-    const trimmed = (safeCommand || '').trim();
-    if (trimmed.startsWith('{') && trimmed.includes('command')) {
-      let extracted = null;
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed && typeof parsed.command === 'string') {
-          extracted = parsed.command;
-        }
-      } catch (e) {
-        const match = trimmed.match(/"command"\s*:\s*"((?:\\.|[^"])*)"/);
-        if (match) {
-          extracted = match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-        }
-      }
-      if (typeof extracted === 'string' && extracted.trim()) {
-        safeCommand = extracted;
-      }
-    }
 
-    // Defensive: Strip LLM hallucinations like "command: ls" or "bash: ls" or "{command: ls}"
-    if (typeof safeCommand === 'string') {
-      let cleaned = safeCommand.trim();
-      const hadJsonishPrefix = /^\s*\{/.test(cleaned) || /^(command|bash|sh|sh -c)\s*:/i.test(cleaned);
-      // Handle unquoted pseudo-JSON like "{command: curl ...}"
-      cleaned = cleaned.replace(/^\{\s*(command|bash|sh|sh -c)\s*:\s*/i, '');
-      cleaned = cleaned.replace(/^(command|bash|sh|sh -c)\s*:\s*/i, '');
-      cleaned = cleaned.replace(/\}\s*$/, '');
-      if (hadJsonishPrefix || /,\s*(timeout|cwd|env|args|path)\s*::/i.test(cleaned) || /,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:/i.test(cleaned)) {
-        cleaned = cleaned.replace(/\]\s*,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:\s*.*$/i, '');
-        cleaned = cleaned.replace(/,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:\s*.*$/i, '');
-        cleaned = cleaned.replace(/\]\s*$/, '');
-      }
-      safeCommand = cleaned.trim();
-    }
-
-    if (!safeCommand || typeof safeCommand !== 'string') {
-      throw new Error('Missing bash command');
-    }
-    const workDir = params.cwd ? path.resolve(targetDir, params.cwd) : targetDir;
-    const isRoot = workDir === '/' || workDir === '/root' || workDir === '/home';
-    const heavyRootCmd = /^\s*(ls\s+-R|grep\s+-R|find\s+\/|rg\s+--files\s+\/)/i.test(safeCommand);
-    if (isRoot && heavyRootCmd) {
-      return {
-        status: 'error',
-        output: 'Blocked heavy filesystem scan at root. Scope searches to the repo root and use rg/find with narrow patterns.',
-        exitCode: 2
-      };
-    }
-    if (/^\s*\{\s*command\b/i.test(safeCommand) || /"command"\s*:/.test(safeCommand) || /,\s*"?\s*timeout\s*"?\s*:/.test(safeCommand)) {
-      return {
-        status: 'error',
-        output: 'Invalid command wrapper detected. Provide a raw shell command only (no JSON, no command: prefix).',
-        exitCode: 2
-      };
-    }
-
-    // Enforce target URL usage for api-fuzzer to avoid localhost drift
-    if (agentName.includes('api-fuzzer') && webUrl) {
-      const host = (() => {
-        try {
-          return new URL(webUrl).hostname;
-        } catch {
-          return null;
-        }
-      })();
-      const usesLocalhost = /https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(safeCommand);
-      const isTargetLocal = host === 'localhost' || host === '127.0.0.1';
-      if (usesLocalhost && !isTargetLocal) {
-        return {
-          status: 'error',
-          output: `Blocked: api-fuzzer must use target webUrl (${webUrl}) instead of localhost.`,
-          exitCode: 2
-        };
-      }
-    }
-
-    // Add timeout to prevent hanging on large searches
-    const timeoutSeconds = 60;
-
-    console.log(chalk.gray(`      🐚 Executing: ${safeCommand}`));
-
-    // Execute command in target directory using exec
-    const { exec } = await import('child_process');
-    const { promisify } = await import('util');
-    const execAsync = promisify(exec);
-
-    // Resolve working directory: if params.cwd is provided, resolve against targetDir
-    const { stdout, stderr } = await execAsync(safeCommand, {
-      cwd: workDir,
-      shell: shellPath,
-      maxBuffer: 1024 * 1024 * 10, // 10MB buffer
-      timeout: timeoutSeconds * 1000, // Timeout in milliseconds
-      env: {
-        ...process.env,
-        // Ensure curl/wget traffic goes through configured proxy
-        HTTP_PROXY: process.env.HTTP_PROXY || '',
-        HTTPS_PROXY: process.env.HTTPS_PROXY || '',
-        http_proxy: process.env.http_proxy || '',
-        https_proxy: process.env.https_proxy || '',
-        NO_PROXY: process.env.NO_PROXY || '',
-        no_proxy: process.env.no_proxy || ''
-      }
-    });
-
-    const output = stdout || stderr || '';
-    console.log(chalk.gray(`      ✅ Command completed (${output.length} chars)`));
-
-    return {
-      status: 'success',
-      output: output.trim(),
-      exitCode: 0
-    };
-  } catch (error) {
-    // Check if it's a timeout error
-    const timeoutMsg = typeof timeoutSeconds !== 'undefined' ? timeoutSeconds : 60;
-    if (error.killed && error.signal === 'SIGTERM') {
-      console.log(chalk.red(`      ❌ Command timed out after ${timeoutMsg}s`));
-      return {
-        status: 'error',
-        output: `Command timed out after ${timeoutMsg} seconds. Try a more specific search pattern or check for heavy commands.`,
-        exitCode: 124 // Standard timeout exit code
-      };
-    }
-
-    const output = error.stdout || error.stderr || error.message;
-
-    // Special handling for grep: exit code 1 means "no matches found", which is a valid result
-    if (safeCommand.trim().startsWith('grep') && error.code === 1) {
-      return {
-        status: 'success',
-        output: '(No matches found)',
-        exitCode: 1
-      };
-    }
-
-    return {
-      status: 'error',
-      output: output,
-      exitCode: error.code || 1
-    };
-  }
-}
 
 /**
  * TodoWrite tool for sub-agents to maintain their task list
@@ -254,180 +87,32 @@ export async function executeTodoWrite(params) {
 function registerSubAgentTools() {
   const subAgentRegistry = new (toolRegistry.constructor)();
 
-  // Register bash tool
-  subAgentRegistry.register(
-    'bash',
-    'Execute bash commands for file operations, code search (grep, find), and analysis.',
-    BashToolSchema,
-    executeBash
-  );
+  // 1. Core Bash & Shell access (using the same hardened executeBash)
+  subAgentRegistry.register('bash', 'Execute shell commands.', BashInputSchema, executeBash);
+  subAgentRegistry.register('Bash', 'Alias for bash.', BashInputSchema, executeBash);
+  subAgentRegistry.register('run_command', 'Alias for bash.', BashInputSchema, executeBash);
 
-  // Register Bash (capitalized) as alias
-  subAgentRegistry.register(
-    'Bash',
-    'Alias for bash tool',
-    BashToolSchema,
-    executeBash
-  );
+  // 2. High-Performance Filesystem Tools (delegated to same handlers)
+  subAgentRegistry.register('list_files', 'List files with filtering.', ListFilesInputSchema, listFiles);
+  subAgentRegistry.register('ls', 'Alias for bash (provides details).', BashInputSchema, executeBash);
+  subAgentRegistry.register('find', 'Alias for bash.', BashInputSchema, executeBash);
 
-  // Register TodoWrite tool
-  subAgentRegistry.register(
-    'TodoWrite',
-    'Write or update your internal todo list to track progress.',
-    TodoWriteSchema,
-    executeTodoWrite
-  );
+  subAgentRegistry.register('read_file', 'Read file content.', ReadFileInputSchema, readFile);
+  subAgentRegistry.register('open_file', 'Alias for read_file.', ReadFileInputSchema, readFile);
 
-  // Common aliases that LLMs might use based on their training
-  const bashAliases = ['run_command', 'grep', 'search_file', 'open_file', 'read_file', 'ls', 'find', 'list_files', 'rg'];
-  for (const alias of bashAliases) {
-    subAgentRegistry.register(
-      alias,
-      `Alias for bash. Use this for ${alias} operations.`,
-      z.object({
-        command: z.string().optional(),
-        path: z.string().optional(),
-        query: z.string().optional(),
-        cwd: z.string().optional(),
-        line_start: z.coerce.number().optional(),
-        line_end: z.coerce.number().optional(),
-        max_results: z.coerce.number().optional()
-      }),
-      async (p) => {
-        let cmd = p.command;
+  subAgentRegistry.register('search_file', 'Search across files.', SearchFileInputSchema, searchFiles);
+  subAgentRegistry.register('grep', 'Alias for search_file.', SearchFileInputSchema, searchFiles);
+  subAgentRegistry.register('rg', 'Alias for search_file.', SearchFileInputSchema, searchFiles);
 
-        // Cache rg availability for faster searches when possible
-        if (typeof global.__DOKODEMODOOR_RG_AVAILABLE === 'undefined') {
-          try {
-            const { execSync } = await import('child_process');
-            execSync('command -v rg', { stdio: 'ignore' });
-            global.__DOKODEMODOOR_RG_AVAILABLE = true;
-          } catch (e) {
-            global.__DOKODEMODOOR_RG_AVAILABLE = false;
-          }
-        }
-
-        // Helper to quote strings for shell
-        const shQuote = (str) => {
-          if (!str) return '""';
-          return "'" + str.replace(/'/g, "'\\''") + "'";
-        };
-
-        // Path normalization: Safe guarding against LLM omitting leading slash on absolute paths.
-        if (p.path) {
-          const targetDir = getTargetDir();
-
-          // Resolve relative paths against repo root
-          if (!path.isAbsolute(p.path)) {
-            const absCandidate = path.resolve(targetDir, p.path);
-            if (fs.existsSync(absCandidate)) {
-              p.path = absCandidate;
-              console.log(chalk.gray(`      🔧 Auto-resolved path: ${p.path}`));
-            }
-          }
-
-          // If still missing, attempt basename recovery via rg --files
-          if (!fs.existsSync(p.path)) {
-            try {
-              const { execSync } = await import('child_process');
-              const base = path.basename(p.path);
-              // Prioritize exact filename match in any subdirectory
-              const cmd = `rg --files -g '**/${base}' ${shQuote(targetDir)} | head -n 1`;
-              const match = execSync(cmd, { encoding: 'utf8' }).trim();
-              if (match) {
-                p.path = match;
-                console.log(chalk.gray(`      🔧 Auto-recovered path: ${p.path}`));
-              }
-            } catch (e) {
-              // Best-effort fallback; keep original path if anything fails.
-            }
-          }
-
-          // Legacy normalization for absolute-like paths missing leading slash
-          if (!p.path.startsWith('/')) {
-            const correctedPath = '/' + p.path;
-            if (!fs.existsSync(p.path) && correctedPath.includes(targetDir)) {
-              p.path = correctedPath;
-              console.log(chalk.gray(`      🔧 Context-aware path normalization: ${p.path}`));
-            }
-          }
-        }
-
-        // Logical mapping based on alias and provided parameters
-        if (alias === 'open_file' || alias === 'read_file') {
-          if (!cmd && p.path) {
-            if (p.line_start !== undefined || p.line_end !== undefined) {
-              const start = p.line_start || 1;
-              const end = p.line_end || '$';
-
-              cmd = `sed -n '${start},${end}p' ${shQuote(p.path)}`;
-            } else {
-              cmd = `cat ${shQuote(p.path)}`;
-            }
-          }
-        } else if (alias === 'grep' || alias === 'search_file' || alias === 'rg') {
-          if (p.query) {
-            const parsedMax = Number.parseInt(p.max_results, 10);
-            const max = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 1000) : 100;
-            const targetPath = p.path || '.';
-            if (global.__DOKODEMODOOR_RG_AVAILABLE) {
-              cmd = `rg -n --no-heading --color never ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
-            } else {
-              // -n for line numbers, -r for recursive
-              cmd = `grep -rn -- ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
-            }
-          }
-        } else if (alias === 'ls') {
-          const targetPath = p.path || '.';
-          cmd = `ls -la ${shQuote(targetPath)}`;
-        } else if (alias === 'find' && p.query) {
-          const targetPath = p.path || '.';
-          cmd = `find ${shQuote(targetPath)} -name ${shQuote(`*${p.query}*`)}`;
-        } else if (alias === 'list_files' && p.query) {
-          const targetPath = p.path || '.';
-          if (global.__DOKODEMODOOR_RG_AVAILABLE) {
-            cmd = `rg --files -g ${shQuote(`*${p.query}*`)} ${shQuote(targetPath)}`;
-          } else {
-            cmd = `find ${shQuote(targetPath)} -name ${shQuote(`*${p.query}*`)}`;
-          }
-        }
-
-        // Fallback to p.command if still empty
-        if (!cmd) {
-          cmd = p.command || (p.path ? `cat ${shQuote(p.path)}` : null) || (p.query ? `grep -rn -- ${shQuote(p.query)} ${shQuote(p.path || '.')} | head -n 100` : null);
-        }
-
-        // AUTO-FIX: If we have a path but the command (like sed, cat, head, tail) doesn't contain it, append it.
-        // DO NOT auto-fix if command contains a pipe, as appending at the end is usually wrong for piped commands.
-        if (p.path && cmd && !cmd.includes('|')) {
-          const commonTools = ['cat', 'sed', 'head', 'tail', 'grep', 'wc', 'strings'];
-          const firstWord = cmd.trim().split(/\s+/)[0];
-
-          if (commonTools.includes(firstWord)) {
-            const escapedPath = p.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Support matching path even if it is quoted
-            const pathRegex = new RegExp(`(^|\\s)["']?${escapedPath}["']?(\\s|$)`);
-
-            if (!pathRegex.test(cmd)) {
-              cmd = `${cmd.trim()} ${p.path}`;
-              console.log(chalk.gray(`      🔧 Auto-fixed command: ${cmd}`));
-            }
-          }
-        }
-
-        if (!cmd) return { status: 'error', message: 'Missing command or path' };
-        return executeBash({ command: cmd, cwd: p.cwd });
-      }
-    );
-  }
-
-
-// CRITICAL: Sub-agents should NEVER save deliverables as it causes premature phase termination
-  // We removed save_deliverable from sub-agent tools to avoid confusing the LLM and generating blocked messages.
-  // Instead, sub-agents are instructed to return findings via ## Summary.
+  // 3. Todo Maintenance
+  subAgentRegistry.register('TodoWrite', 'Update internal todo list.', TodoWriteSchema, executeTodoWrite);
 
   return subAgentRegistry;
 }
+
+// CRITICAL: Sub-agents should NEVER save deliverables as it causes premature phase termination
+// We removed save_deliverable from sub-agent tools to avoid confusing the LLM and generating blocked messages.
+// Instead, sub-agents are instructed to return findings via ## Summary.
 
 /**
  * Execute a task using a specialized sub-agent
@@ -812,3 +497,10 @@ DO NOT call any tools during this consolidation phase.`;
     };
   }
 }
+
+export const taskAgentTool = {
+  name: 'TaskAgent',
+  description: 'Delegate a task to a specialized sub-agent. Use this to analyze source code, trace authentication mechanisms, or investigate specific security concerns.',
+  inputSchema: TaskAgentInputSchema,
+  handler: taskAgent
+};

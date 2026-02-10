@@ -53,6 +53,23 @@ If a query exists only in tests, record as **“not found in production code”*
 
 ## 3) INPUT DEPENDENCIES (MANDATORY)
 
+### 3.X SQLI QUICK MAP (FOCUS ONLY)
+- **High-signal endpoints**: Use the SQLi section of `deliverables/recon_verify_deliverable.md` or the Injection Source Inventory.
+- **Primary files**: Use File:Line references from recon/recon-verify (do NOT hardcode paths).
+- **Known raw-query sinks**: raw SQL execution, ORM raw fragments, dynamic query builders.
+- **Full context**: Read `deliverables/recon_deliverable.md` only as needed. Do NOT paste or re-summarize the full recon report.
+
+### 3.X SQLI PATTERN QUICK REF
+| Pattern | Risk | Example |
+|---|---|---|
+| Raw SQL string concat | High | `"SELECT ... " + userInput` |
+| LIKE + string interpolation | High | `"... LIKE '%" + q + "%'"` |
+| Parameterized/bind | Lower | `sequelize.query(sql, { replacements })` |
+
+### 3.X DELIVERABLES (TOP PRIORITY)
+- You MUST save **SQLI_ANALYSIS** and **SQLI_QUEUE** via `save_deliverable`.
+- Do NOT proceed to summary/closure until both are saved.
+
 ### 3.0 Execution Model
 
 You correlate findings from three sources:

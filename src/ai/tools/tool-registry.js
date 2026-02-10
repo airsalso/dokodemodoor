@@ -10,10 +10,7 @@ import { z } from 'zod';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import chalk from 'chalk';
-import fs from 'node:fs';
-import path from 'node:path';
 import { mcpManager } from './mcp-proxy.js';
-import { getTargetDir } from '../../utils/context.js';
 
 // Initialize Ajv for remote tool validation
 // Support Draft 2020-12 and better flexibility for MCP/LLM schemas
@@ -25,15 +22,6 @@ const ajv = new Ajv({
 });
 addFormats(ajv);
 
-/**
- * [목적] Zod 스키마를 OpenAI JSON Schema 형식으로 변환.
- *
- * [호출자]
- * - ToolRegistry.getOpenAITools()
- *
- * [출력 대상]
- * - JSON Schema 객체 반환
- */
 export function zodToJsonSchema(zodSchema) {
   // If it's already a JSON schema or has our marker, return it directly
   if (zodSchema && (zodSchema.__isJsonSchema || !zodSchema._def)) {
@@ -61,15 +49,6 @@ export function zodToJsonSchema(zodSchema) {
   };
 }
 
-/**
- * [목적] 개별 Zod 타입을 JSON Schema 타입으로 변환.
- *
- * [호출자]
- * - zodToJsonSchema()
- *
- * [출력 대상]
- * - JSON Schema 타입 객체 반환
- */
 function convertZodType(zodType) {
   const typeName = zodType._def.typeName;
 
@@ -117,12 +96,7 @@ function convertZodType(zodType) {
   }
 }
 
-/**
- * [목적] JSON Schema에서 지원하지 않거나 오류를 유발하는 키워드($schema 등)를 제거.
- *
- * [호출자]
- * - registerRemoteMCPTools()
- */
+
 function cleanSchema(schema) {
   if (!schema || typeof schema !== 'object') return schema;
 
@@ -184,18 +158,7 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
-  /**
-   * Get tool definitions in OpenAI format
-   */
-  /**
-   * [목적] 등록된 도구를 OpenAI function calling 스키마로 변환.
-   *
-   * [호출자]
-   * - vLLM Provider (tool registry 조회)
-   *
-   * [출력 대상]
-   * - OpenAI tools 배열 반환
-   */
+
   getOpenAITools() {
     return Array.from(this.tools.values()).map(tool => ({
       type: 'function',
@@ -207,22 +170,6 @@ export class ToolRegistry {
     }));
   }
 
-  /**
-   * Execute a tool by name
-   */
-  /**
-   * [목적] 등록된 도구를 이름으로 실행.
-   *
-   * [호출자]
-   * - tool-executor.js
-   *
-   * [출력 대상]
-   * - 도구 실행 결과 반환
-   *
-   * [입력 파라미터]
-   * - name (string)
-   * - args (object)
-   */
   async executeTool(name, args) {
     const tool = this.tools.get(name);
     if (!tool) {
@@ -240,424 +187,55 @@ export class ToolRegistry {
 // Global tool registry instance
 export const toolRegistry = new ToolRegistry();
 
-/**
- * Register MCP tools from DokodemoDoor helper server
- */
-/**
- * Register MCP tools from DokodemoDoor helper server
- */
-/**
- * [목적] MCP 서버 기반 도구들을 레지스트리에 등록.
- *
- * [호출자]
- * - agent-executor.js (vLLM 사용 시)
- *
- * [출력 대상]
- * - toolRegistry에 MCP 도구 등록
- *
- * [반환값]
- * - Promise<void>
- */
+
 export async function registerMCPTools() {
-  // Import and register save_deliverable tool
+  // 1. Core Platform Tools (guarded)
   const saveDeliverableModule = await import('../../../mcp-server/src/tools/save-deliverable.js');
-  const { SaveDeliverableInputSchema, saveDeliverable } = saveDeliverableModule;
-  toolRegistry.register(
-    'save_deliverable',
-    'Saves deliverable files with automatic validation. Queue files must have {"vulnerabilities": [...]} structure.',
-    SaveDeliverableInputSchema,
-    saveDeliverable
-  );
+  toolRegistry.register('save_deliverable', 'Saves deliverable files with automatic validation.', saveDeliverableModule.SaveDeliverableInputSchema, saveDeliverableModule.saveDeliverable);
 
-  // Import and register generate_totp tool
   const generateTotpModule = await import('../../../mcp-server/src/tools/generate-totp.js');
-  const { GenerateTotpInputSchema, generateTotp } = generateTotpModule;
-  toolRegistry.register(
-    'generate_totp',
-    'Generates 6-digit TOTP code for authentication. Secret must be base32-encoded.',
-    GenerateTotpInputSchema,
-    generateTotp
-  );
+  toolRegistry.register('generate_totp', 'Generates 6-digit TOTP code for authentication.', generateTotpModule.GenerateTotpInputSchema, generateTotpModule.generateTotp);
 
-  // Import and register TaskAgent tool
   const taskAgentModule = await import('../../../mcp-server/src/tools/task-agent.js');
-  const {
-    TaskAgentInputSchema, taskAgent,
-    BashToolSchema, executeBash,
-    TodoWriteSchema, executeTodoWrite
-  } = taskAgentModule;
+  toolRegistry.register('TaskAgent', 'Delegate a task to a specialized sub-agent.', taskAgentModule.TaskAgentInputSchema, taskAgentModule.taskAgent);
 
-  toolRegistry.register(
-    'TaskAgent',
-    'Delegate a task to a specialized sub-agent. Use this to analyze source code, trace authentication mechanisms, or investigate specific security concerns.',
-    TaskAgentInputSchema,
-    taskAgent
-  );
+  const todoWriteModule = await import('../../../mcp-server/src/tools/task-agent.js');
+  toolRegistry.register('TodoWrite', 'Update internal todo list.', todoWriteModule.TodoWriteSchema, todoWriteModule.executeTodoWrite);
 
-  toolRegistry.register(
-    'bash',
-    'Execute bash commands for file operations, code search (grep, find), and analysis.',
-    BashToolSchema,
-    executeBash
-  );
-
-  const directAliases = ['Bash', 'sh', 'execute_command'];
-  for (const alias of directAliases) {
-    toolRegistry.register(
-      alias,
-      'Alias for bash tool',
-      BashToolSchema,
-      executeBash
-    );
-  }
-
-  toolRegistry.register(
-    'TodoWrite',
-    'Write or update your internal todo list to track progress.',
-    TodoWriteSchema,
-    executeTodoWrite
-  );
-
-  // Import and register HTTP Helper tools
-  const httpHelpersModule = await import('../../../mcp-server/src/tools/http-helpers.js');
-  const {
-    BuildHttpRequestInputSchema, buildHttpRequest,
-    CalculateContentLengthInputSchema, calculateContentLength,
-    ParseHttpRequestInputSchema, parseHttpRequest
-  } = httpHelpersModule;
-
-  toolRegistry.register(
-    'build_http_request',
-    'Build a well-formed HTTP request with automatic Content-Length calculation. Use this before crafting manual HTTP requests.',
-    BuildHttpRequestInputSchema,
-    buildHttpRequest
-  );
-
-  toolRegistry.register(
-    'calculate_content_length',
-    'Calculate the exact byte length of an HTTP request body. Use when manually crafting requests.',
-    CalculateContentLengthInputSchema,
-    calculateContentLength
-  );
-
-  toolRegistry.register(
-    'parse_http_request',
-    'Parse a raw HTTP request into components (method, headers, body). Use to analyze captured HTTP requests.',
-    ParseHttpRequestInputSchema,
-    parseHttpRequest
-  );
-
-  // Common aliases for main agent as well
-  const bashAliases = ['run_command', 'grep', 'search_file', 'open_file', 'read_file', 'browse_file', 'view_file', 'ls', 'find', 'rg', 'write_file', 'save_file'];
-  for (const alias of bashAliases) {
-    toolRegistry.register(
-      alias,
-      `Alias for bash. Use this for ${alias} operations.`,
-      z.object({
-        command: z.string().optional(),
-        path: z.string().optional(),
-        query: z.string().optional(),
-        cwd: z.string().optional(),
-        line_start: z.coerce.number().optional(),
-        line_end: z.coerce.number().optional(),
-        max_results: z.coerce.number().optional(),
-        content: z.string().optional()
-      }),
-      async (p) => {
-        let cmd = p.command;
-
-        // Defensive: Strip LLM hallucinations and unwrap JSON-wrapped commands.
-        if (typeof cmd === 'string') {
-          let cleaned = cmd.trim();
-          const hadJsonishPrefix = /^\s*\{/.test(cleaned) || /^(command|bash|sh|sh -c)\s*:/i.test(cleaned);
-
-          // If the command itself is a JSON string like {"command":"curl ...","cwd":"..."}
-          if (cleaned.startsWith('{') && cleaned.includes('command')) {
-            let extracted = null;
-            try {
-              const parsed = JSON.parse(cleaned);
-              if (parsed && typeof parsed.command === 'string') {
-                extracted = parsed.command;
-              }
-            } catch (e) {
-              const match = cleaned.match(/"command"\s*:\s*"((?:\\.|[^"])*)"/);
-              if (match) {
-                extracted = match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-              }
-            }
-            if (typeof extracted === 'string' && extracted.trim()) {
-              cleaned = extracted;
-            }
-          }
-
-          // Handle unquoted pseudo-JSON like "{command: curl ...}"
-          cleaned = cleaned.replace(/^\{\s*(command|bash|sh|sh -c)\s*:\s*/i, '');
-          cleaned = cleaned.replace(/^(command|bash|sh|sh -c)\s*:\s*/i, '');
-          cleaned = cleaned.replace(/\}\s*$/, '');
-          if (hadJsonishPrefix || /,\s*(timeout|cwd|env|args|path)\s*::/i.test(cleaned) || /,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:/i.test(cleaned)) {
-            cleaned = cleaned.replace(/\]\s*,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:\s*.*$/i, '');
-            cleaned = cleaned.replace(/,\s*"?\s*(timeout|cwd|env|args|path)\s*"?\s*:\s*.*$/i, '');
-            cleaned = cleaned.replace(/\]\s*$/, '');
-          }
-          cmd = cleaned.trim();
-        }
-
-        // Cache rg availability for faster searches when possible
-        if (typeof global.__DOKODEMODOOR_RG_AVAILABLE === 'undefined') {
-          try {
-            const { execSync } = await import('child_process');
-            execSync('command -v rg', { stdio: 'ignore' });
-            global.__DOKODEMODOOR_RG_AVAILABLE = true;
-          } catch (e) {
-            global.__DOKODEMODOOR_RG_AVAILABLE = false;
-          }
-        }
-
-        // Helper to quote strings for shell
-        const shQuote = (str) => {
-          if (!str) return '""';
-          return "'" + str.replace(/'/g, "'\\''") + "'";
-        };
-
-        // Path normalization: Safe guarding against LLM omitting leading slash on absolute paths.
-        if (p.path) {
-          const targetDir = getTargetDir();
-          const repoPath = '{{REPO_PATH}}'; // This is a placeholder that gets replaced in some contexts, but here we use it as a hint for relative paths
-
-          // Resolve relative paths against repo root
-          if (!path.isAbsolute(p.path)) {
-            const absCandidate = path.resolve(targetDir, p.path);
-            if (fs.existsSync(absCandidate)) {
-              p.path = absCandidate;
-              console.log(chalk.gray(`      🔧 Auto-resolved path: ${p.path}`));
-            }
-          }
-
-          // If still missing, attempt basename recovery via rg --files
-          if (!fs.existsSync(p.path)) {
-            try {
-              const { execSync } = await import('child_process');
-              const base = path.basename(p.path);
-              // Prioritize exact filename match in any subdirectory
-              const cmd = `rg --files -g '**/${base}' ${shQuote(targetDir)} | head -n 1`;
-              const match = execSync(cmd, { encoding: 'utf8' }).trim();
-              if (match) {
-                p.path = match;
-                console.log(chalk.gray(`      🔧 Auto-recovered path: ${p.path}`));
-              }
-            } catch (e) {
-              // Best-effort fallback; keep original path if anything fails.
-            }
-          }
-
-          // Legacy normalization for absolute-like paths missing leading slash
-          if (!p.path.startsWith('/')) {
-            const correctedPath = '/' + p.path;
-            if (!fs.existsSync(p.path) && correctedPath.includes(targetDir)) {
-              p.path = correctedPath;
-              console.log(chalk.gray(`      🔧 Context-aware path normalization: ${p.path}`));
-            }
-          }
-        }
-
-        // If path looks like README.md but doesn't exist, try case-insensitive match in the same dir.
-        if (p.path) {
-          try {
-            const base = path.basename(p.path);
-            if (base.toLowerCase() === 'readme.md' && !fs.existsSync(p.path)) {
-              const dir = path.dirname(p.path);
-              const entries = fs.readdirSync(dir);
-              const match = entries.find(name => name.toLowerCase() === 'readme.md');
-              if (match) {
-                p.path = path.join(dir, match);
-              }
-            }
-          } catch (e) {
-            // Best-effort fallback; keep original path if anything fails.
-          }
-        }
-
-        // Logical mapping based on alias and provided parameters
-        if (alias === 'write_file' || alias === 'save_file') {
-          if (p.path && p.content !== undefined) {
-            try {
-              const targetDir = getTargetDir();
-              const fullPath = path.isAbsolute(p.path) ? p.path : path.resolve(targetDir, p.path);
-
-              // Ensure directory exists
-              const dir = path.dirname(fullPath);
-              if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-              }
-
-              fs.writeFileSync(fullPath, p.content, 'utf8');
-              return { status: 'success', message: `File saved to ${p.path}` };
-            } catch (e) {
-              return { status: 'error', message: `Failed to save file: ${e.message}` };
-            }
-          }
-          return { status: 'error', message: 'write_file requires both path and content' };
-        }
-
-        if (alias === 'open_file' || alias === 'read_file' || alias === 'browse_file' || alias === 'view_file') {
-          if (!cmd && p.path) {
-            // Defensive: Check if path is actually file content (hallucination)
-            if (p.path.includes('\n') || p.path.length > 512) {
-              return { status: 'error', message: `Path argument looks like file content, not a valid path. Please provide a relative or absolute file path.` };
-            }
-            if (p.line_start !== undefined || p.line_end !== undefined) {
-              const start = p.line_start || 1;
-              const end = p.line_end || '$';
-
-              cmd = `sed -n '${start},${end}p' ${shQuote(p.path)}`;
-            } else {
-              cmd = `cat ${shQuote(p.path)}`;
-            }
-          }
-        } else if (alias === 'grep' || alias === 'search_file' || alias === 'rg') {
-          if (p.query) {
-            const parsedMax = Number.parseInt(p.max_results, 10);
-            const max = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 1000) : 100;
-            const targetPath = p.path || '.';
-
-            // Smart query: if multiple words are provided, create a regex that matches lines containing all of them
-            // This is better than literal match for vulnerability hunting.
-            let searchableQuery = p.query;
-            const words = p.query.trim().split(/\s+/).filter(w => w.length > 0);
-            if (words.length > 1) {
-              // Regex pattern for AND logic: (?=.*word1)(?=.*word2)...
-              searchableQuery = words.map(w => `(?=.*${w})`).join('') + '.*';
-            }
-
-            const excludes = [
-              'node_modules', 'vendor', '.git', '.idea', '.vscode',
-              'audit-logs*', 'deliverables*', 'reports',
-              'dist', 'build', 'target', 'bin', 'obj', 'out',
-              '__pycache__', 'venv', '.venv'
-            ];
-            const rgExcludes = excludes.map(e => `-g '!${e}'`).join(' ');
-            const grepExcludes = excludes.map(e => `--exclude-dir=${shQuote(e)}`).join(' ');
-
-            const regexMeta = /[()[\]{}.+*?^$|\\]/;
-            const useFixed = regexMeta.test(p.query);
-
-            if (global.__DOKODEMODOOR_RG_AVAILABLE) {
-              if (useFixed) {
-                cmd = `rg -n --no-heading --color never ${rgExcludes} -F ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
-              } else if (words.length > 1) {
-                cmd = `rg -n --no-heading --color never ${rgExcludes} -P ${shQuote(searchableQuery)} ${shQuote(targetPath)} | head -n ${max}`;
-              } else {
-                cmd = `rg -n --no-heading --color never ${rgExcludes} ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
-              }
-            } else {
-              if (useFixed) {
-                cmd = `grep -rn ${grepExcludes} -F -- ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
-              } else if (words.length > 1) {
-                let grepChain = `grep -rn ${grepExcludes} -- . ${shQuote(targetPath)}`;
-                for (const word of words) {
-                  grepChain += ` | grep -i ${shQuote(word)}`;
-                }
-                cmd = `${grepChain} | head -n ${max}`;
-              } else {
-                cmd = `grep -rn ${grepExcludes} -- ${shQuote(p.query)} ${shQuote(targetPath)} | head -n ${max}`;
-              }
-            }
-          }
-        } else if (alias === 'ls' && (!cmd || cmd.startsWith('-'))) {
-          const targetPath = p.path || '.';
-          const flags = cmd || '';
-          cmd = `ls -la ${flags} ${shQuote(targetPath)}`;
-        } else if (alias === 'find' && (!cmd || cmd.startsWith('-'))) {
-          const targetPath = p.path || '.';
-          const flags = cmd || '';
-          const nameFilter = p.query ? `-name ${shQuote(`*${p.query}*`)}` : '';
-          cmd = `find ${shQuote(targetPath)} ${flags} ${nameFilter}`;
-        } else if (alias === 'list_files' && (!cmd || cmd.startsWith('-'))) {
-          const targetPath = p.path || '.';
-          const flags = cmd || '';
-          if (global.__DOKODEMODOOR_RG_AVAILABLE) {
-            const globFilter = p.query ? `-g ${shQuote(`*${p.query}*`)}` : '';
-            cmd = `rg ${flags} --files ${globFilter} ${shQuote(targetPath)}`;
-          } else {
-            const nameFilter = p.query ? `-name ${shQuote(`*${p.query}*`)}` : '';
-            cmd = `find ${shQuote(targetPath)} ${flags} ${nameFilter}`;
-          }
-        }
-
-        // Fallback to p.command if still empty
-        if (!cmd) {
-          if (p.command) {
-            cmd = p.command;
-          } else if (p.path) {
-            // Check if path is a directory before using cat
-            try {
-              if (fs.existsSync(p.path) && fs.statSync(p.path).isDirectory()) {
-                cmd = `ls -la ${shQuote(p.path)}`;
-              } else {
-                cmd = `cat ${shQuote(p.path)}`;
-              }
-            } catch (e) {
-              cmd = `cat ${shQuote(p.path)}`;
-            }
-          } else if (p.query) {
-            cmd = `grep -rn ${shQuote(p.query)} ${shQuote(p.path || '.')} | head -n 100`;
-          }
-        }
-
-        // AUTO-FIX: If we have a path but the command (like sed, cat, head, tail) doesn't contain it, append it.
-        // DO NOT auto-fix if command contains a pipe, as appending at the end is usually wrong for piped commands.
-        if (p.path && cmd && !cmd.includes('|')) {
-          const commonTools = ['cat', 'sed', 'head', 'tail', 'grep', 'wc', 'strings', 'ls', 'find'];
-          const firstWord = cmd.trim().split(/\s+/)[0];
-
-          if (commonTools.includes(firstWord)) {
-            const escapedPath = p.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Support matching path even if it is quoted
-            const pathRegex = new RegExp(`(^|\\s)["']?${escapedPath}["']?(\\s|$)`);
-
-            if (!pathRegex.test(cmd)) {
-              cmd = `${cmd.trim()} ${p.path}`;
-              console.log(chalk.gray(`      🔧 Auto-fixed command: ${cmd}`));
-            }
-          }
-        }
-
-        if (cmd === 'cat' || cmd === 'grep' || cmd === 'sed') {
-          return { status: 'error', message: `Command '${cmd}' requires arguments or a path` };
-        }
-
-        if (!cmd) return { status: 'error', message: 'Missing command, path, or query' };
-        const workDir = p.cwd || '';
-        const isRoot = workDir === '/' || workDir === '/root' || workDir === '/home';
-        const heavyRootCmd = /^\s*(ls\s+-R|grep\s+-R|find\s+\/|rg\s+--files\s+\/)/i.test(cmd);
-        if (isRoot && heavyRootCmd) {
-          return {
-            status: 'error',
-            message: 'Blocked heavy filesystem scan at root. Scope searches to the repo root and use rg/find with narrow patterns.'
-          };
-        }
-        if (/^\s*\{\s*command\b/i.test(cmd) || /"command"\s*:/.test(cmd) || /,\s*"?\s*timeout\s*"?\s*:/.test(cmd)) {
-          return {
-            status: 'error',
-            message: 'Invalid command wrapper detected. Provide a raw shell command only (no JSON, no command: prefix).'
-          };
-        }
-        return executeBash({ command: cmd });
-      }
-    );
-  }
-
-  // Import and register list_files tool
+  // 2. High-Performance Filesystem Tools
   const listFilesModule = await import('../../../mcp-server/src/tools/list-files.js');
-  const { ListFilesInputSchema, listFiles } = listFilesModule;
-  toolRegistry.register(
-    'list_files',
-    'List files under a path with optional substring filtering.',
-    ListFilesInputSchema,
-    listFiles
-  );
+  toolRegistry.register('list_files', listFilesModule.listFilesTool.description, listFilesModule.ListFilesInputSchema, listFilesModule.listFiles);
 
-  console.log(`✓ Registered ${toolRegistry.tools.size} local MCP tools`);
+  const readFileModule = await import('../../../mcp-server/src/tools/read-file.js');
+  const readAliases = ['read_file', 'view_file', 'open_file', 'browse_file'];
+  for (const alias of readAliases) {
+    toolRegistry.register(alias, readFileModule.readFileTool.description, readFileModule.ReadFileInputSchema, readFileModule.readFile);
+  }
+
+  const writeFileModule = await import('../../../mcp-server/src/tools/write-file.js');
+  toolRegistry.register('write_file', writeFileModule.writeFileTool.description, writeFileModule.WriteFileInputSchema, writeFileModule.writeFile);
+  toolRegistry.register('save_file', 'Alias for write_file', writeFileModule.WriteFileInputSchema, writeFileModule.writeFile);
+
+  const searchFilesModule = await import('../../../mcp-server/src/tools/search-tools.js');
+  const searchAliases = ['search_file', 'grep', 'rg'];
+  for (const alias of searchAliases) {
+    toolRegistry.register(alias, searchFilesModule.searchFilesTool.description, searchFilesModule.SearchFileInputSchema, searchFilesModule.searchFiles);
+  }
+
+  // 3. Smart Bash Tools (Standard Shell access)
+  const bashModule = await import('../../../mcp-server/src/tools/bash-tools.js');
+  const bashAliases = ['bash', 'Bash', 'sh', 'execute_command', 'run_command', 'ls', 'find'];
+  for (const alias of bashAliases) {
+    toolRegistry.register(alias, bashModule.bashTool.description, bashModule.BashInputSchema, bashModule.executeBash);
+  }
+
+  // 4. HTTP Protocol Helpers
+  const httpHelpersModule = await import('../../../mcp-server/src/tools/http-helpers.js');
+  toolRegistry.register('build_http_request', 'Build well-formed HTTP requests.', httpHelpersModule.BuildHttpRequestInputSchema, httpHelpersModule.buildHttpRequest);
+  toolRegistry.register('calculate_content_length', 'Calculate exact byte length of request body.', httpHelpersModule.CalculateContentLengthInputSchema, httpHelpersModule.calculateContentLength);
+  toolRegistry.register('parse_http_request', 'Parse raw HTTP requests.', httpHelpersModule.ParseHttpRequestInputSchema, httpHelpersModule.parseHttpRequest);
+
+  console.log(`✓ Registered ${toolRegistry.tools.size} unified MCP tools`);
 }
 
 /**

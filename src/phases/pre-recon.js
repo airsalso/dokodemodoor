@@ -199,7 +199,7 @@ async function runSemgrepAnalysis(sourceDir) {
 async function runOSVAnalysis(sourceDir) {
   const timer = new Timer('osv-analysis');
   try {
-    console.log(chalk.blue(`    🔍 Running OSV security analysis (SCA)...`));
+    console.log(chalk.blue(`    🔍 Running OSV security analysis...`));
     const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../scripts/osv-scanner.mjs');
 
     const result = await $({ silent: true })`node ${scriptPath} ${sourceDir}`.catch(e => e);
@@ -530,8 +530,7 @@ async function stitchPreReconOutputs(outputs, sourceDir) {
   }
 
   // Build references instead of full content to save context
-  const semgrepContent = 'Detailed findings available in `deliverables/semgrep_analysis_deliverable.md` (Already injected via {{SECURITY_CONTEXT}} for reasoning).';
-
+  const semgrepContent = 'Detailed findings available in `deliverables/semgrep_analysis_deliverable.md`.';
   const osvContent = 'Detailed findings available in `deliverables/osv_analysis_deliverable.md`.';
 
   // Build additional scans section
@@ -552,7 +551,6 @@ ${scan.output}
   const report = `
 # Pre-Reconnaissance Report
 
-
 ## Network Scanning (nmap)
 Status: ${nmap?.status || 'Skipped'}
 ${formatNmapOutput(nmap)}
@@ -572,13 +570,14 @@ ${(() => {
   const out = typeof whatweb === 'string' ? whatweb : (whatweb.output || '');
   return out.trim() ? "```\n" + out.trim() + "\n```" : 'No technology information discovered';
 })()}
-## Code Analysis
-${codeAnalysisContent}
 
-## Static Analysis Hotspots (Semgrep)
+## Code Analysis
+${codeAnalysisContent.trim()}
+
+## Static Analysis Hotspots
 ${semgrepContent}
 
-## Open Source Vulnerabilities (SCA/OSV)
+## Open Source Vulnerabilities
 ${osvContent}
 
 ${additionalSection}

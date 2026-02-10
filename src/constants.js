@@ -152,7 +152,8 @@ export const AGENT_VALIDATORS = Object.freeze({
     if (!(await fs.pathExists(reconFile))) return false;
     if (!(await fs.pathExists(reconVerifyFile))) return false;
     const content = await fs.readFile(reconVerifyFile, 'utf8');
-    return content.includes('Recon Verification Deliverable') || content.includes('RECON VERIFY');
+    const lowerContent = content.toLowerCase();
+    return lowerContent.includes('recon verify') || lowerContent.includes('recon verification');
   },
   'api-fuzzer': async (sourceDir) => {
     const deliverablesDir = path.join(sourceDir, 'deliverables');

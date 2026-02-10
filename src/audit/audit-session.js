@@ -7,7 +7,7 @@
 
 import { AgentLogger } from './logger.js';
 import { MetricsTracker } from './metrics-tracker.js';
-import { initializeAuditStructure, formatTimestamp } from './utils.js';
+import { initializeAuditStructure, generateAuditPath, formatTimestamp } from './utils.js';
 import { SessionMutex } from '../utils/concurrency.js';
 
 // Global mutex instance
@@ -49,6 +49,7 @@ export class AuditSession {
 
     // Active logger (one at a time per agent attempt)
     this.currentLogger = null;
+    this.sessionDir = generateAuditPath(sessionMetadata);
 
     // Initialization flag
     this.initialized = false;

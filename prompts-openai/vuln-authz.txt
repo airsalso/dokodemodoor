@@ -55,6 +55,24 @@ If the question becomes *“Is the user who they claim to be?”* → STOP. That
 
 ## 3) INPUT DEPENDENCIES (MANDATORY)
 
+### 3.X AUTHZ QUICK MAP (FOCUS ONLY)
+- **High-signal endpoints**: ownership/role-gated resources identified in recon.
+- **Primary files**: Use File:Line references from recon/recon-verify (do NOT hardcode paths).
+- **Known risky patterns**: missing ownership checks, weak role gates, non-strict ID comparisons.
+- **Full context**: Read `deliverables/recon_deliverable.md` only as needed. Do NOT paste or re-summarize the full recon report.
+
+### 3.X AUTHZ PATTERN QUICK REF
+| Pattern | Risk | Example |
+|---|---|---|
+| Missing ownership check | High | `return resource` without owner verify |
+| Weak role gate | High | role only from JWT claim |
+| Inconsistent ID guards | Medium | `!=` / non-strict checks |
+| Strong guard | Lower | `if (ownerId !== userId) return 403` |
+
+### 3.X DELIVERABLES (TOP PRIORITY)
+- You MUST save **AUTHZ_ANALYSIS** and **AUTHZ_QUEUE** via `save_deliverable`.
+- Do NOT proceed to summary/closure until both are saved.
+
 ### 3.0 Execution Model
 
 You correlate findings from three sources:
@@ -309,6 +327,7 @@ Only include vulnerabilities that are:
 - Ready for weaponization
 
 If none found → `{ "vulnerabilities": [] }`
+
 
 ---
 

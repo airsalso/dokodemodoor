@@ -148,6 +148,52 @@ async function processIncludes(content, baseDir) {
 /**
  * [목적] deliverables 폴더의 OSV 및 Semgrep 결과물을 수집하여 프롬프트에 제공.
  */
+function summarizeSemgrep(content, maxFindings = 20) {
+  const lines = content.split('\n');
+  const findings = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith('### [')) {
+      const title = line.replace('### ', '').trim();
+      const severity = title.includes('(ERROR)') ? 'ERROR'
+        : title.includes('(WARNING)') ? 'WARNING'
+          : title.includes('(INFO)') ? 'INFO'
+            : 'OTHER';
+      let desc = '';
+      let files = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        const l = lines[j];
+        if (l.startsWith('### [')) break;
+        if (l.startsWith('**Description:**')) {
+          desc = l.replace('**Description:**', '').trim();
+        }
+        if (l.startsWith('| `') || l.startsWith('| `') || l.includes('`') && l.includes('|')) {
+          // capture file rows from markdown tables
+          if (l.includes('`')) files.push(l.trim());
+        }
+      }
+      findings.push({ title, severity, desc, files: files.slice(0, 3), order: findings.length });
+      i = j;
+      if (findings.length >= maxFindings) break;
+      continue;
+    }
+    i++;
+  }
+  if (findings.length === 0) return content.length > 1200 ? content.slice(0, 1200) + '... (truncated)' : content;
+  const severityRank = { ERROR: 3, WARNING: 2, INFO: 1, OTHER: 0 };
+  const ordered = [...findings].sort((a, b) => {
+    const diff = (severityRank[b.severity] || 0) - (severityRank[a.severity] || 0);
+    return diff !== 0 ? diff : a.order - b.order;
+  }).slice(0, maxFindings);
+  const summary = ordered.map(f => {
+    const fileLines = f.files.length ? `\n  Files:\n  ${f.files.join('\n  ')}` : '';
+    return `- ${f.title}\n  Desc: ${f.desc || 'N/A'}${fileLines}`;
+  }).join('\n');
+  return `Top Semgrep Findings (summarized):\n${summary}`;
+}
+
 async function collectSecurityContext(repoPath) {
   try {
     const securityContext = [];
@@ -156,16 +202,20 @@ async function collectSecurityContext(repoPath) {
     if (!await fs.pathExists(deliverablesDir)) return '';
 
     const securityFiles = [
-      { name: 'osv_analysis_deliverable.md', title: 'Open Source Vulnerabilities (SCA)' },
-      { name: 'semgrep_analysis_deliverable.md', title: 'Static Analysis Hotspots (Semgrep)' }
+      { name: 'osv_analysis_deliverable.md', title: 'Open Source Vulnerabilities' },
+      { name: 'semgrep_analysis_deliverable.md', title: 'Static Analysis Hotspots' }
     ];
 
     for (const file of securityFiles) {
       const filePath = path.join(deliverablesDir, file.name);
       if (await fs.pathExists(filePath)) {
         const content = await fs.readFile(filePath, 'utf8');
-        // Limit each context to avoid token overflow
-        const truncated = content.length > 5000 ? content.slice(0, 5000) + '... (truncated)' : content;
+        let rendered = content;
+        if (file.name === 'semgrep_analysis_deliverable.md') {
+          rendered = summarizeSemgrep(content, 20);
+        }
+        const maxLen = 5000;
+        const truncated = rendered.length > maxLen ? rendered.slice(0, maxLen) + '... (truncated)' : rendered;
         securityContext.push(`### ${file.title}\n${truncated}`);
       }
     }

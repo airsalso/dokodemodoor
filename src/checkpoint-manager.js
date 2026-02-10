@@ -231,7 +231,7 @@ const runLoginCheckIfConfigured = async (session, runAgentPromptWithRetry, loadP
       throw new PentestError(
         'Login verification failed (see login-check output)',
         'authentication',
-        false,
+        true,
         { status: status || 'UNKNOWN', output: (result.result || '').slice(0, 1200) }
       );
     }
@@ -1000,6 +1000,21 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
   const eligibleAgents = eligibilityChecks
     .filter(check => check.eligible)
     .map(check => check.agentName);
+
+  const ineligibleAgents = eligibilityChecks
+    .filter(check => !check.eligible)
+    .map(check => check.agentName);
+
+  // Mark ineligible agents as skipped in the session store to satisfy prerequisites
+  if (ineligibleAgents.length > 0) {
+    const { markAgentSkipped } = await import('./session-manager.js');
+    for (const agentName of ineligibleAgents) {
+      // Only mark as skipped if it's not already completed or skipped
+      if (!freshSession.completedAgents.includes(agentName) && !freshSession.skippedAgents.includes(agentName)) {
+        await markAgentSkipped(freshSession.id, agentName);
+      }
+    }
+  }
 
   const activeAgents = eligibleAgents.filter(agent => !freshSession.completedAgents.includes(agent));
 

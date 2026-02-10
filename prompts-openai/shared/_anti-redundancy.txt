@@ -1,14 +1,10 @@
 # ANTI-REDUNDANCY & CATEGORY ISOLATION RULES (NON-NEGOTIABLE)
 
-1. **STRICT CATEGORY FILTERING**: You are a specialist. You MUST ONLY report findings that fall strictly within your assigned category (e.g., AuthZ, SQLI, SSRF).
+1. **STRICT CATEGORY FILTERING**: You are a specialist. You MUST ONLY report findings that fall strictly within your assigned category.
 2. **ZERO TOLERANCE FOR OVERLAP**:
-   - DO NOT report SQL Injection (SQLI).
-   - DO NOT report Cross-Site Scripting (XSS).
-   - DO NOT report Server-Side Request Forgery (SSRF) or Open Redirects.
-   - DO NOT report File System Abuse / Path Traversal (PATHI).
-   - DO NOT report Code/Command Injection (CODEI).
-   - DO NOT report Template Injection (SSTI).
-   - DO NOT report Authentication failures (AuthN) like cookie flags or password policy.
+   - DO NOT report findings from categories OTHER than your own. Use the Recon report ONLY to identify your specific targets.
+   - For example, if you are a SQLI specialist, you MUST NOT report AuthZ, SSTI, XSS, etc.
+   - The full list of categories to AVOID (unless it is your assigned specialty) is: SQL Injection (SQLI), Cross-Site Scripting (XSS), Server-Side Request Forgery (SSRF), Path Traversal (PATHI), Code/Command Injection (CODEI), Server-Side Template Injection (SSTI), Authorization (AuthZ), and Authentication (AuthN).
 3. **LIMITED CROSS-CATEGORY CONTEXT (EXCEPTION)**:
    - You MAY include **1–2 lines of contextual cause** if another category is the **direct mechanism** enabling your finding.
    - This context must NOT become a separate finding; it is only to explain exploitability or root cause.

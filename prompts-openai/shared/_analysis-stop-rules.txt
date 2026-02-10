@@ -9,3 +9,8 @@ You MAY conclude the analysis phase and proceed to `save_deliverable` if ANY of 
    - You find yourself repeating the same searches or file-read operations without new findings.
 
 **MANDATORY**: If you stop early or hit turn limits, you MUST explicitly record "Analysis Blind Spots" (what was not tested) in your Final Report.
+
+### QUEUE SAVE ORDER (MANDATORY)
+- After you draft the exploitation queue JSON, you MUST call `save_deliverable` for the queue immediately.
+- Do NOT output any summary text between drafting the queue JSON and saving it.
+- Do NOT re-draft or revise the queue JSON after saving; if you made a mistake, explicitly state the correction in the analysis report instead.

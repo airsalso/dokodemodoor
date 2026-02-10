@@ -60,6 +60,24 @@ If a sink exists only in tests, record as **“not found in production code.”*
 
 ## 3) INPUT DEPENDENCIES (MANDATORY)
 
+### 3.X PATHI QUICK MAP (FOCUS ONLY)
+- **High-signal sinks**: file read/write/stream/send operations with user-controlled paths.
+- **Primary files**: Use File:Line references from recon/recon-verify (do NOT hardcode paths).
+- **Known risky patterns**: path joins/resolves with user input, archive extraction without normalization.
+- **Full context**: Read `deliverables/recon_deliverable.md` only as needed. Do NOT paste or re-summarize the full recon report.
+
+### 3.X PATHI PATTERN QUICK REF
+| Pattern | Risk | Example |
+|---|---|---|
+| User input into path join | High | `path.resolve(base + userPath)` |
+| Archive extraction without normalize | High | `entry.path` written directly |
+| Download handlers | Medium | `sendFile(userPath)` |
+| Strict allowlist | Lower | `if (!allow.has(name)) return` |
+
+### 3.X DELIVERABLES (TOP PRIORITY)
+- You MUST save **PATHI_ANALYSIS** and **PATHI_QUEUE** via `save_deliverable`.
+- Do NOT proceed to summary/closure until both are saved.
+
 ### 3.0 Execution Model
 
 You correlate findings from three sources:

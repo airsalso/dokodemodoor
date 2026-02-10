@@ -58,6 +58,24 @@ If a render path exists only in tests, record as **“not found in production co
 
 ## 3) INPUT DEPENDENCIES (MANDATORY)
 
+### 3.X SSTI QUICK MAP (FOCUS ONLY)
+- **High-signal sinks**: template compilation/render operations (engine-agnostic).
+- **Primary files**: Use File:Line references from recon/recon-verify (do NOT hardcode paths).
+- **Known risky patterns**: user input concatenated into template strings before compilation/render.
+- **Full context**: Read `deliverables/recon_deliverable.md` only as needed. Do NOT paste or re-summarize the full recon report.
+
+### 3.X SSTI PATTERN QUICK REF
+| Pattern | Risk | Example |
+|---|---|---|
+| Compile user-influenced template | High | `pug.compile(templateString)` |
+| Render with untrusted locals | High | `render('view', { userInput })` |
+| Escaping only after concat | Medium | `tmpl = tmpl + user; escape(tmpl)` |
+| Safe template with strict escaping | Lower | `render(view, sanitize(locals))` |
+
+### 3.X DELIVERABLES (TOP PRIORITY)
+- You MUST save **SSTI_ANALYSIS** and **SSTI_QUEUE** via `save_deliverable`.
+- Do NOT proceed to summary/closure until both are saved.
+
 ### 3.0 Execution Model
 
 You correlate findings from three sources:

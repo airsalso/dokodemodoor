@@ -60,6 +60,24 @@ If a sink exists only in tests, record as **“not found in production code.”*
 
 ## 3) INPUT DEPENDENCIES (MANDATORY)
 
+### 3.X CODEI QUICK MAP (FOCUS ONLY)
+- **High-signal sinks**: command/code execution primitives (exec/spawn/eval/vm/Function equivalents).
+- **Primary files**: Use File:Line references from recon/recon-verify (do NOT hardcode paths).
+- **Known risky patterns**: user-controlled args or strings passed to execution primitives.
+- **Full context**: Read `deliverables/recon_deliverable.md` only as needed. Do NOT paste or re-summarize the full recon report.
+
+### 3.X CODEI PATTERN QUICK REF
+| Pattern | Risk | Example |
+|---|---|---|
+| `exec` with string concat | High | `exec(\"ping \" + host)` |
+| `spawn` with user args | High | `spawn(cmd, [userArg])` |
+| `eval` / `Function` | High | `eval(userInput)` |
+| Safe allowlist | Lower | `if (!allow.has(cmd)) return` |
+
+### 3.X DELIVERABLES (TOP PRIORITY)
+- You MUST save **CODEI_ANALYSIS** and **CODEI_QUEUE** via `save_deliverable`.
+- Do NOT proceed to summary/closure until both are saved.
+
 ### 3.0 Execution Model
 
 You correlate findings from three sources:

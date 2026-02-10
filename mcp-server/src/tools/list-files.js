@@ -1,119 +1,93 @@
 /**
- * list_files MCP Tool
- *
- * Lists files under a path, optionally filtered by a substring.
+ * list_files MCP Tool (Hardened)
  */
 
 import { z } from 'zod';
 import { createToolResult } from '../types/tool-responses.js';
 import { getTargetDir } from '../../../src/utils/context.js';
-import { readdir } from 'fs/promises';
-import { existsSync, statSync } from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { existsSync } from 'fs';
 import path from 'path';
+import { shQuote, isRgAvailable, ensureInSandbox } from '../utils/shell-utils.js';
 
+const execAsync = promisify(exec);
 const DEFAULT_MAX_RESULTS = 400;
-const DEFAULT_MAX_DEPTH = 8;
 
-const EXCLUDED_DIRS = new Set([
+const EXCLUDED_DIRS = [
   'node_modules', 'vendor', '.git', '.idea', '.vscode',
   'audit-logs', 'reports',
   'sessions', 'repos', 'osv-logs',
   'dist', 'build', 'target', 'bin', 'obj', 'out',
   '__pycache__', 'venv', '.venv'
-]);
+];
 
 export const ListFilesInputSchema = z.object({
   path: z.string().optional().describe('Root path to search (default: ".")'),
   query: z.string().optional().describe('Substring to match in file path or name'),
-  max_results: z.number().int().min(1).max(1000).optional().describe('Maximum number of files to return'),
-  max_depth: z.number().int().min(1).max(20).optional().describe('Maximum directory depth to traverse'),
+  max_results: z.coerce.number().int().min(1).max(1000).optional().describe('Maximum number of files to return'),
+  command: z.string().optional().describe('Legacy backward compatibility for raw flags'),
+  cwd: z.string().optional().describe('Working directory')
 });
 
 export async function listFiles(args = {}) {
   try {
     const targetDir = getTargetDir();
-    const inputPath = args.path || '.';
-    const basePath = path.isAbsolute(inputPath)
-      ? inputPath
-      : path.join(targetDir, inputPath);
-    const query = (args.query || '').toLowerCase();
+    let inputPath = args.path || '.';
+    const query = args.query || '';
     const maxResults = args.max_results ?? DEFAULT_MAX_RESULTS;
-    const maxDepth = args.max_depth ?? DEFAULT_MAX_DEPTH;
+    const workDir = args.cwd ? path.resolve(targetDir, args.cwd) : targetDir;
 
-    const targetAbs = path.resolve(targetDir);
-    const baseAbsCandidate = path.resolve(basePath);
-    if (!baseAbsCandidate.startsWith(targetAbs)) {
-      return createToolResult({
-        status: 'error',
-        message: `Path must be under target repository: ${targetDir}`,
-        errorType: 'FileSystemError',
-        retryable: false,
-      });
-    }
+    // 1. Hardened Sandbox Check
+    let basePath = path.isAbsolute(inputPath) ? inputPath : path.resolve(workDir, inputPath);
+    basePath = ensureInSandbox(basePath, targetDir);
 
     if (!existsSync(basePath)) {
       return createToolResult({
         status: 'error',
-        message: `Path does not exist: ${basePath}`,
-        errorType: 'FileSystemError',
-        retryable: false,
+        message: `Path does not exist: ${inputPath}`,
+        errorType: 'FileSystemError'
       });
     }
 
-    if (!statSync(basePath).isDirectory()) {
-      return createToolResult({
-        status: 'error',
-        message: `Path is not a directory: ${basePath}`,
-        errorType: 'FileSystemError',
-        retryable: false,
-      });
+    // 2. Performance-based Execution
+    let cmd = '';
+    const rgExcludes = EXCLUDED_DIRS.map(e => `-g '!${e}'`).join(' ');
+    const findExcludes = EXCLUDED_DIRS.map(e => `-path '*/${e}*' -prune -o`).join(' ');
+
+    if (isRgAvailable()) {
+      const globFilter = query ? `-g ${shQuote(`*${query}*`)}` : '';
+      const flags = (args.command && args.command.startsWith('-')) ? args.command : '';
+      cmd = `rg ${flags} --files ${rgExcludes} ${globFilter} ${shQuote(basePath)} | head -n ${maxResults}`;
+    } else {
+      const nameFilter = query ? `-name ${shQuote(`*${query}*`)}` : '';
+      cmd = `find ${shQuote(basePath)} ${findExcludes} -type f ${nameFilter} -print | head -n ${maxResults}`;
     }
 
-    const baseAbs = baseAbsCandidate;
-    const results = [];
-    const stack = [{ dir: baseAbs, depth: 0 }];
+    const { stdout } = await execAsync(cmd, { cwd: workDir });
 
-    while (stack.length && results.length < maxResults) {
-      const { dir, depth } = stack.pop();
-      let entries;
-      try {
-        entries = await readdir(dir, { withFileTypes: true });
-      } catch (err) {
-        continue;
-      }
-
-      for (const entry of entries) {
-        if (results.length >= maxResults) break;
-        const full = path.join(dir, entry.name);
-        const rel = path.relative(baseAbs, full);
-
-        if (entry.isDirectory()) {
-          if (EXCLUDED_DIRS.has(entry.name)) continue;
-          if (depth + 1 <= maxDepth) {
-            stack.push({ dir: full, depth: depth + 1 });
-          }
-          continue;
-        }
-
-        const candidate = rel.toLowerCase();
-        if (!query || candidate.includes(query)) {
-          results.push(rel);
-        }
-      }
-    }
+    const rawFiles = stdout.trim().split('\n').filter(Boolean);
+    const files = rawFiles.map(f => path.relative(targetDir, f));
 
     return createToolResult({
       status: 'success',
-      message: `Found ${results.length} files`,
-      files: results,
-      count: results.length,
+      message: `Found ${files.length} files`,
+      files: files,
+      count: files.length
     });
+
   } catch (error) {
     return createToolResult({
       status: 'error',
-      message: error?.message || 'Unknown error',
-      errorType: 'FileSystemError',
-      retryable: true,
+      message: `Failed to list files: ${error.message}`,
+      errorType: error.message.includes('Permission Denied') ? 'SecurityError' : 'FileSystemError'
     });
   }
 }
+
+export const listFilesTool = {
+  name: 'list_files',
+  description: 'Lists files recursively under a path with smart exclusions and substring filtering. Optimized for large repos.',
+  inputSchema: ListFilesInputSchema,
+  handler: listFiles
+};

@@ -50,6 +50,8 @@ Target URL: {{WEB_URL}}
   - Using `page.type` instead of `page.fill` for the last character
   - Ensuring any obstructing overlays (modals, privacy banners, etc.) are definitely dismissed (they can block events)
 - **Navigation**: Many SPAs do not trigger a full page reload on login. Use `waitForURL` or check URL change instead of `waitForNavigation`.
+ - **Overlay Handling Cap**: If a banner/dialog click times out once, do NOT retry it. Capture a snapshot and proceed with the login flow.
+ - **Fallback Dismiss**: If an overlay blocks interaction, try **one** of these once: `Escape` key or clicking outside the dialog. Then continue.
 
 5. If already logged in when the browser opens:
    - verify success_condition immediately
@@ -57,19 +59,21 @@ Target URL: {{WEB_URL}}
    - wait 5 seconds
    - retry the full login flow **once**
 7. Capture evidence:
-   - If Playwright supports screenshots, save:
-     - `deliverables/login-check/login_success.png` on success
-     - `deliverables/login-check/login_failure.png` on failure
+   - If Playwright supports screenshots, save to:
+     - `deliverables/findings/login-check/login_success.png` on success
+     - `deliverables/findings/login-check/login_failure.png` on failure
    - If the folder does not exist, create it using bash before saving
 8. Capture DOM snapshot on failure:
-   - Use Playwright snapshot (or page content) and save to `deliverables/login-check/login_failure_snapshot.txt`
+   - Use Playwright snapshot (or page content) and save to `deliverables/findings/login-check/login_failure_snapshot.txt`
    - Use bash to write the snapshot text to the file
 9. Log auth indicators (no secrets):
    - Report whether auth cookies exist (names only)
    - Report whether localStorage/sessionStorage contains auth tokens (key names only)
 
 10. **SAVE AUTH SESSION (MANDATORY)**:
-   - After successful login, you MUST extract and save the following authentication data using `save_deliverable` with `deliverable_type: "AUTH_SESSION"`:
+   - After successful login, you MUST **first extract** the authentication data, **then** call `save_deliverable`.
+   - Do NOT save empty placeholders. If extraction fails, record failure and output LOGIN_FAILURE.
+   - Extract and save the following authentication data using `save_deliverable` with `deliverable_type: "AUTH_SESSION"`:
      - **Cookies**: Full list of cookies (name, value, domain, path)
      - **LocalStorage/SessionStorage**: Any keys and values that appear to be authentication tokens (JWTs, session IDs, etc.)
      - **Headers**: If you can see common request headers (from browser network events), include them.

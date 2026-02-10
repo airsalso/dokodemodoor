@@ -100,11 +100,11 @@ async function queryOsv(dep, ecosystemType) {
 }
 
 async function main() {
-  console.log(chalk.cyan(`🚀 Starting OSV (SCA) Analysis via API: ${repoPath}`));
+  console.log(chalk.cyan(`🚀 Starting Open Source Vulnerability Analysis via API: ${repoPath}`));
   await fs.mkdir(deliverableDir, { recursive: true });
 
   const ecosystems = await detectEcosystems(repoPath);
-  let report = '# OSV Security Analysis (SCA)\n\n';
+  let report = '# Open Source Vulnerability\n\n';
   report += `Analysis Date: ${new Date().toISOString()}\n\n`;
 
   if (ecosystems.length === 0) {

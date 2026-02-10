@@ -908,12 +908,22 @@ export class VLLMProvider extends LLMProvider {
           }
         }
 
-        if (repeat || searchOpenCount >= 10 || reportStuck) {
-           const reason = repeat ? 'repeating tool calls' : (reportStuck ? 'cycling through deliverables' : 'performing too many redundant internal searches');
+        // Deep Analysis Agents (pre-recon, vuln) need more breathing room for searches
+        const isDeepRecon = name.includes('pre-recon') || name.includes('vuln');
+        const searchOpenThreshold = isDeepRecon ? 25 : 10;
+
+        if (repeat || searchOpenCount >= searchOpenThreshold || reportStuck) {
+           const reason = repeat ? 'repeating tool calls' : (reportStuck ? 'cycling through deliverables' : 'performing extensive internal searches');
 
            // Forceful nudge: stop doing the loop action
            const isSub = (agentName || description || '').toLowerCase().includes('sub-agent') || (agentName || description || '').toLowerCase().includes('taskagent');
+
            let nudge = `[LOOP DETECTION] You are ${reason}. You have already tried this or read these files. PLEASE STOP and move to the next item or ${isSub ? 'provide ## Summary' : 'FINAL REPORT'}.`;
+
+           if (isDeepRecon && !repeat && !reportStuck) {
+             nudge = `[ANALYSIS NUDGE] You have performed many searches (${searchOpenCount}). Please ensure you are finding NEW information and not cycling. If you have enough info, proceed to synthesis. If not, continue carefully.`;
+           }
+
            if (turnCount > maxTurns * 0.7) {
              nudge = `[LOOP DETECTION] You are ${reason} while turns are low (${turnCount}/${maxTurns}). ABANDON this investigation. Compile what you have and ${isSub ? 'provide ## Summary' : 'SAVE DELIVERABLES'} immediately.`;
            }
@@ -1305,6 +1315,9 @@ export class VLLMProvider extends LLMProvider {
              }
            }
 
+           if (content) {
+             yield { type: 'assistant', message: { role: 'assistant', content } };
+           }
            messages.push(message);
            finished = true;
            yield { type: 'result', result: content, subtype: 'success', duration_ms: Date.now() - startTime, usage: response.usage };

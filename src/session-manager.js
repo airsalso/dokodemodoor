@@ -205,7 +205,7 @@ export const AGENTS = Object.freeze({
     displayName: 'Report agent',
     phase: 'reporting',
     order: 22,
-    prerequisites: ['authz-exploit']
+    prerequisites: ['sqli-exploit', 'codei-exploit', 'ssti-exploit', 'pathi-exploit', 'xss-exploit', 'auth-exploit', 'ssrf-exploit', 'authz-exploit']
   },
 
   // Phase 6 - OSV Analysis (Standalone compatible)
@@ -373,11 +373,17 @@ const findExistingSession = async (webUrl, targetRepo) => {
     return null;
   }
 
-  // Prefer non-completed sessions, most recent activity first
-  const inProgress = matches.filter(session => session.status !== 'completed');
-  const pool = inProgress.length > 0 ? inProgress : matches;
+  // Filter out sessions that are already functionally complete
+  const activeSessions = matches.filter(session => {
+    const { isPipelineComplete } = getSessionStatus(session);
+    return !isPipelineComplete;
+  });
 
-  return pool.sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity))[0];
+  if (activeSessions.length === 0) {
+    return null;
+  }
+
+  return activeSessions.sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity))[0];
 };
 
 // Generate session ID as unique UUID
@@ -434,11 +440,13 @@ export const createSession = async (webUrl, repoPath, configFile = null, targetR
     // If session is not completed, reuse it
     if (existingSession.status !== 'completed') {
       console.log(chalk.blue(`📝 Reusing existing session: ${existingSession.id.substring(0, 8)}...`));
+      const pipelineAgents = new Set(Object.values(PHASES).flat());
       const completedCount = new Set([
         ...(existingSession.completedAgents || []),
         ...(existingSession.skippedAgents || [])
-      ]).size;
-      console.log(chalk.gray(`   Progress: ${completedCount}/${Object.keys(AGENTS).length} agents completed`));
+      ].filter(name => pipelineAgents.has(name))).size;
+
+      console.log(chalk.gray(`   Progress: ${completedCount}/${pipelineAgents.size} agents completed`));
 
       // Update last activity and ensure status is 'in-progress' upon reuse
       await updateSession(existingSession.id, {
@@ -586,10 +594,22 @@ export const updateSession = async (sessionId, updates) => {
 
     // Preserve the current state before applying updates
     const currentState = store.sessions[sessionId];
+    const newState = {
+      ...currentState,
+      ...updates
+    };
+
+    // Auto-sync status if any agent-related fields were updated
+    const agentFields = ['completedAgents', 'failedAgents', 'skippedAgents', 'runningAgents'];
+    const wasAgentListUpdated = Object.keys(updates).some(key => agentFields.includes(key));
+
+    if (wasAgentListUpdated) {
+      const { status } = getSessionStatus(newState);
+      newState.status = status;
+    }
 
     store.sessions[sessionId] = {
-      ...currentState,
-      ...updates,
+      ...newState,
       lastActivity: getLocalISOString()
     };
 
@@ -974,15 +994,9 @@ export const markAgentCompleted = async (sessionId, agentName, checkpointCommit)
     }
   };
 
-  // Check if all agents are now completed and update session status
-  const totalAgents = Object.keys(AGENTS).length;
-  const completedCount = new Set([
-    ...updates.completedAgents,
-    ...(updates.skippedAgents || [])
-  ]).size;
-  if (completedCount === totalAgents) {
-    updates.status = 'completed';
-  }
+  // Sync session status
+  const { status } = getSessionStatus({ ...session, ...updates });
+  updates.status = status;
 
   return await updateSession(sessionId, updates);
 };
@@ -1022,6 +1036,10 @@ export const markAgentFailed = async (sessionId, agentName) => {
     runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName)
   };
 
+  // Sync session status
+  const { status } = getSessionStatus({ ...session, ...updates });
+  updates.status = status;
+
   return await updateSession(sessionId, updates);
 };
 
@@ -1060,14 +1078,9 @@ export const markAgentSkipped = async (sessionId, agentName) => {
     runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName)
   };
 
-  const totalAgents = Object.keys(AGENTS).length;
-  const completedCount = new Set([
-    ...updates.completedAgents,
-    ...updates.skippedAgents
-  ]).size;
-  if (completedCount === totalAgents) {
-    updates.status = 'completed';
-  }
+  // Sync session status
+  const { status } = getSessionStatus({ ...session, ...updates });
+  updates.status = status;
 
   return await updateSession(sessionId, updates);
 };
@@ -1092,6 +1105,10 @@ export const markAgentRunning = async (sessionId, agentName) => {
     // If it was marked as failed before, clear it when we start running again
     failedAgents: (session.failedAgents || []).filter(a => a !== agentName)
   };
+
+  // Sync session status
+  const { status } = getSessionStatus({ ...session, ...updates });
+  updates.status = status;
 
   return await updateSession(sessionId, updates);
 };
@@ -1148,22 +1165,24 @@ const getTimeAgo = (timestamp) => {
  */
 export const getSessionStatus = (session) => {
   // Only count agents that belong to a defined phase for the progress bar
-  const phaseAgents = new Set(Object.values(PHASES).flat());
-  const totalAgents = phaseAgents.size;
+  const pipelineAgents = new Set(Object.values(PHASES).flat());
+  const totalAgents = pipelineAgents.size;
 
   const completedCount = new Set([
     ...(session.completedAgents || []),
     ...(session.skippedAgents || [])
-  ].filter(name => phaseAgents.has(name))).size;
+  ].filter(name => pipelineAgents.has(name))).size;
 
-  const failedCount = (session.failedAgents || []).filter(name => phaseAgents.has(name)).length;
+  const failedCount = (session.failedAgents || []).filter(name => pipelineAgents.has(name)).length;
+
+  const isPipelineComplete = completedCount === totalAgents;
 
   let status;
   if ((session.runningAgents || []).length > 0) {
     status = 'running';
   } else if (failedCount > 0) {
     status = 'failed';
-  } else if (completedCount === totalAgents) {
+  } else if (isPipelineComplete) {
     status = 'completed';
   } else {
     status = 'in-progress';
@@ -1174,7 +1193,8 @@ export const getSessionStatus = (session) => {
     completedCount,
     totalAgents,
     failedCount,
-    completionPercentage: Math.round((completedCount / totalAgents) * 100)
+    completionPercentage: Math.round((completedCount / totalAgents) * 100),
+    isPipelineComplete
   };
 };
 

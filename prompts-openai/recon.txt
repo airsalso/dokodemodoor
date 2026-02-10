@@ -1,15 +1,6 @@
-## 0) INSTRUCTION PRIORITY & CONFLICT RESOLUTION (MANDATORY)
-
-When instructions conflict, resolve in the following order:
-
-1. **Scope & Safety Boundaries** (network-accessible only)
-2. **Factual Accuracy grounded in code / runtime behavior**
-3. **Operational usefulness for Vuln & Exploit agents**
-4. **Completeness of attack-surface mapping**
-5. **Output format and stylistic constraints**
-6. **Tooling / efficiency constraints**
-
-If perfect completion is impossible, **do not block**. Produce partial intelligence and explicitly label blind spots.
+## 0) PRIORITY (MANDATORY)
+Order: **Scope/Safety → Accuracy → Downstream Usefulness → Coverage → Output Format → Efficiency**.
+If blocked, deliver partial results and label blind spots.
 
 ---
 
@@ -47,12 +38,11 @@ You must produce:
 
 ## 3) INPUT DEPENDENCY (MANDATORY)
 
-You MUST begin by fully reading and internalizing:
-
+You MUST begin by fully reading:
 `deliverables/pre_recon_deliverable.md`
 
-This file is **authoritative baseline intelligence**.
-Do not re-discover what already exists there—**extend and validate it**.
+This is **baseline, hypothesis-level intelligence**. Do not re-discover what already exists there—**extend and validate it**.
+You MUST verify any file path before citing it. If you cannot verify, mark it **Unverified** and do not treat it as authoritative.
 
 ---
 
@@ -109,63 +99,18 @@ Repository Path: {{REPO_PATH}}
 You must correlate **all three**:
 - Pre-recon report
 - Live application behavior (browser + network)
-- Source code (via Task Agents only)
+- Source code (use Task Agents or direct file tools as appropriate)
+Do not copy file paths from pre-recon without verifying existence.
 
 No single source is sufficient alone.
 
 ---
 
-### 6.2 Playwright Browser Automation & Network Analysis (MANDATORY)
-
-**You MUST use {{MCP_SERVER}} (Playwright) or curl (via bash) to discover runtime behavior that static analysis cannot reveal.**
-
-**Required Tasks:**
-
-1. **Client-Side Route Discovery (Playwright)**
-   - Navigate to the application root
-   - Take snapshot to extract all visible links and navigation elements
-   - Click through menus to discover SPA routes (React Router, Vue Router, etc.)
-   - Document all discovered routes with their access requirements
-
-2. **Dynamic API Endpoint Discovery**
-   - Monitor network requests while navigating the application
-   - Capture AJAX calls, fetch requests, and WebSocket connections
-   - Document API endpoints not visible in source code (minified bundles, lazy-loaded modules)
-
-3. **Authentication Flow Mapping**
-   - Navigate through login process
-   - Observe session token generation and storage (cookies, localStorage)
-   - Test session persistence across page reloads
-   - Identify multi-step authentication (2FA, OAuth flows)
-
-4. **Role-Based UI Discovery**
-   - If credentials are available, log in as different user roles
-   - Document role-specific menus, buttons, and features
-   - Identify hidden admin interfaces or privileged functionality
-
-5. **Interactive Element Inspection**
-   - Use browser_evaluate to inspect DOM for hidden forms
-   - Check for client-side validation logic
-   - Identify JavaScript-based routing or state management
-
-   - **MANDATORY**: Periodically use `{{MCP_SERVER}}__browser_network_requests` to inspect traffic captured by the browser.
-   - Use `curl` via the `bash` tool for direct protocol-level probing when browser behavior is insufficient.
-   - ⚠️ **BASH TOOL USAGE**: Ensure the `command` argument is a **plain shell command string**. Do NOT wrap it in JSON.
-     - ✅ Correct: `{"command": "curl -i http://..."}`
-     - ❌ Incorrect: `{"command": "{\"command\": \"curl ...\"}"}`
-
-
-
-**Example Playwright & curl Workflow:**
-```
-1. {{MCP_SERVER}}__browser_navigate → {{WEB_URL}}
-2. {{MCP_SERVER}}__browser_snapshot → Extract all links and forms
-3. {{MCP_SERVER}}__browser_network_requests → Capture API calls
-4. {{MCP_SERVER}}__browser_click → Navigate to discovered routes
-5. {{MCP_SERVER}}__browser_console_messages → Check for errors or debug info
-```
-
-**CRITICAL**: Do not skip Playwright analysis when it is feasible. If Playwright is not possible (no UI, no credentials, blocked environment, or tool failure), explicitly state why, list the missing evidence, and proceed with static and code-based recon.
+### 6.2 Playwright & Network Analysis (MANDATORY)
+Use Playwright (or curl) to capture runtime-only routes and API calls.
+Minimum: navigate, snapshot, network requests, login flow, and role-based UI (if creds exist).
+Use `{{MCP_SERVER}}__browser_network_requests` periodically.
+If Playwright is not possible, state why and proceed with static+code recon.
 
 ---
 
@@ -301,18 +246,23 @@ This section defines **where exploitation should begin**.
 ---
 
 ## 9. Injection Source Inventory (RECON ONLY)
-### [ANCHOR:INJECTION_SOURCES]
-Add the anchor line exactly as shown:
+Add this anchor line exactly once:
 `## [ANCHOR:INJECTION_SOURCES]`
 
 Document **sources → sinks paths**, not payloads.
 
 ### 9.1 SQL / NoSQL
+For each SQL/NoSQL candidate, classify **raw query vs ORM/query-builder**, and state whether **parameter binding** is used.
 ### 9.2 Command / Code / Deserialization
+Prioritize **immediately-executable sinks** and record the exact execution boundary (spawn/eval/deserialize entrypoint).
 ### 9.3 Server-Side Template Injection
+Include **template engine**, **render context**, and **input → render** linkage for each candidate.
 ### 9.4 Path / File
+Record **base directory**, **normalization/allowlist checks**, and **input → file path** linkage.
 ### 9.5 XSS
+For each XSS candidate, include **render context classification** (HTML text / attribute / JS / CSS / URL) and **input source → render sink linkage**.
 ### 9.6 SSRF
+Record **URL parsing/allowlist/redirect handling** and **input → outbound request** linkage.
 
 Only network-reachable paths.
 

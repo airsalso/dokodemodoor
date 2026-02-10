@@ -55,6 +55,24 @@ If the question becomes *“Can user X access resource Y?”* → STOP. That is 
 
 ## 3) INPUT DEPENDENCIES (MANDATORY)
 
+### 3.X AUTH QUICK MAP (FOCUS ONLY)
+- **High-signal endpoints**: login, reset-password, change-password, security-question flows (from recon).
+- **Primary files**: Use File:Line references from recon/recon-verify (do NOT hardcode paths).
+- **Known risky patterns**: weak credential policies, missing rate limits, token misuse, insecure cookie flags.
+- **Full context**: Read `deliverables/recon_deliverable.md` only as needed. Do NOT paste or re-summarize the full recon report.
+
+### 3.X AUTH PATTERN QUICK REF
+| Pattern | Risk | Example |
+|---|---|---|
+| No rate limit / lockout | High | brute force possible |
+| Weak reset flow | High | reset without strong verification |
+| Session fixation | Medium | token reused across logins |
+| Strong controls | Lower | MFA + lockout + httpOnly |
+
+### 3.X DELIVERABLES (TOP PRIORITY)
+- You MUST save **AUTH_ANALYSIS** and **AUTH_QUEUE** via `save_deliverable`.
+- Do NOT proceed to summary/closure until both are saved.
+
 ### 3.0 Execution Model
 
 You correlate findings from three sources:
