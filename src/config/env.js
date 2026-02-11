@@ -82,7 +82,9 @@ export const config = {
       apiKey: process.env.VLLM_API_KEY || 'EMPTY',
       temperature: parseFloat(process.env.VLLM_TEMPERATURE, 0.7),
       maxTurns: parseInt(process.env.VLLM_MAX_TURNS, 100),
-      maxPromptChars: parseIntDecimal(process.env.VLLM_MAX_PROMPT_CHARS, 32000)
+      maxPromptChars: parseIntDecimal(process.env.VLLM_MAX_PROMPT_CHARS, 32000),
+      promptTokenPrice: parseFloat(process.env.VLLM_PROMPT_TOKEN_PRICE, 0.0), // USD per 1M tokens
+      completionTokenPrice: parseFloat(process.env.VLLM_COMPLETION_TOKEN_PRICE, 0.0) // USD per 1M tokens
     }
   },
 
@@ -97,9 +99,12 @@ export const config = {
     skipSubfinder: parseBoolean(process.env.DOKODEMODOOR_SKIP_SUBFINDER, false),
     skipWhatweb: parseBoolean(process.env.DOKODEMODOOR_SKIP_WHATWEB, false),
     skipSchemathesis: parseBoolean(process.env.DOKODEMODOOR_SKIP_SCHEMATHESIS, false),
+    skipSemgrep: parseBoolean(process.env.DOKODEMODOOR_SKIP_SEMGREP, false),
+    skipOsv: parseBoolean(process.env.DOKODEMODOOR_SKIP_OSV, false),
     preReconParallel: parseBoolean(process.env.DOKODEMODOOR_PRE_RECON_PARALLEL, false),
     subAgentTruncateLimit: parseIntDecimal(process.env.DOKODEMODOOR_SUB_AGENT_TRUNCATE_LIMIT, 50000),
     subAgentMaxTurns: parseIntDecimal(process.env.DOKODEMODOOR_SUB_AGENT_MAX_TURNS, 50),
+    externalTestDomain: process.env.EXTERNAL_TEST_DOMAIN || 'http://attacker-controlled.com',
 
     // Agent-specific overrides (optional)
     agentMaxTurns: {

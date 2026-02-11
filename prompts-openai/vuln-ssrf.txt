@@ -108,12 +108,13 @@ Repository Path: {{REPO_PATH}}
 
 ---
 
-### 3.4 Data Source Derivation (STRICT CATEGORY FILTERING)
+### 3.4 Data Source Derivation (MULTI-SOURCE SYNERGY)
 
-You MUST derive initial tasks ONLY from SSRF‑relevant items:
-- `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for SSRF/Outbound/Proxy tables/rows only.** Ignore SQLI, XSS, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: SSRF]** section. This is your primary target list. If that exact header is missing, use any SSRF‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
-- `deliverables/code_analysis_deliverable.md` → Only sections regarding SSRF (HTTP clients, Webhooks).
+You MUST derive initial tasks by correlating SSRF‑relevant items from ALL available sources:
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: SSRF]**: Your primary high-confidence target list.
+- `deliverables/api_fuzzer_deliverable.md` → **Anomalies / Findings**: Check if fuzzing caused unusual outbound requests or timeout-based info leaks.
+- `deliverables/recon_deliverable.md` → **Injection Source Inventory**: Broad map. Search for server-side fetch/proxy sinks.
+- `{{SECURITY_CONTEXT}}` → **Semgrep SSRF Hotspots**: Absolute priority for code-level investigation.
 
 **Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 
@@ -131,6 +132,11 @@ Assume an attacker with:
 - Internet-only access to {{WEB_URL}}
 - No internal network access, VPN, or server shell
 - Ability to use normal application flows if available
+
+**Out-of-Band (OOB) Testing Policy**:
+If you need to verify an outbound request or perform OOB testing (e.g., DNS/HTTP interaction), you **MUST ONLY** use the following domain:
+`{{EXTERNAL_TEST_DOMAIN}}`
+Do **NOT** use any other external domains, collaborator services, or hardcoded URLs for testing.
 
 Only report vulnerabilities that are **externally exploitable**.
 

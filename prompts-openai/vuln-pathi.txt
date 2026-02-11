@@ -113,12 +113,13 @@ Repository Path: {{REPO_PATH}}
 
 ---
 
-### 3.4 Data Source Derivation (STRICT CATEGORY FILTERING)
+### 3.4 Data Source Derivation (MULTI-SOURCE SYNERGY)
 
-You MUST derive initial tasks ONLY from filesystem‑relevant items:
-- `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for Path/File/Archive tables/rows only.** Ignore SQLI, XSS, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: PATHI]** section. This is your primary target list. If that exact header is missing, use any PATHI‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
-- `deliverables/code_analysis_deliverable.md` → Only paths leading to filesystem sinks (read, write, include).
+You MUST derive initial tasks by correlating filesystem‑relevant items from ALL available sources:
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: PATHI]**: Your primary high-confidence target list.
+- `deliverables/api_fuzzer_deliverable.md` → **Anomalies / 4xx Findings**: Check if fuzzing triggered unusual "File Not Found" errors or exposed base directories.
+- `deliverables/recon_deliverable.md` → **Injection Source Inventory**: Broad map for Path/File/Archive sinks.
+- `{{SECURITY_CONTEXT}}` → **Semgrep PathI Hotspots**: Priority code-pointers for path join, read, or write operations.
 
 **Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 

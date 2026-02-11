@@ -79,8 +79,11 @@ export class MetricsTracker {
       metrics: {
         total_duration_ms: 0,
         total_cost_usd: 0,
-        phases: {},  // Phase-level aggregations: { duration_ms, duration_percentage, cost_usd, agent_count }
-        agents: {}   // Agent-level metrics: { status, attempts[], final_duration_ms, total_cost_usd, checkpoint }
+        total_prompt_tokens: 0,
+        total_completion_tokens: 0,
+        total_tokens: 0,
+        phases: {},  // Phase-level aggregations: { duration_ms, duration_percentage, cost_usd, agent_count, prompt_tokens, completion_tokens, total_tokens }
+        agents: {}   // Agent-level metrics: { status, attempts[], final_duration_ms, total_cost_usd, prompt_tokens, completion_tokens, total_tokens, checkpoint }
       }
     };
   }
@@ -129,7 +132,10 @@ export class MetricsTracker {
         status: 'in-progress',
         attempts: [],
         final_duration_ms: 0,
-        total_cost_usd: 0  // Total cost across all attempts (including retries)
+        total_cost_usd: 0, // Total cost across all attempts (including retries)
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0
       };
     }
 
@@ -140,6 +146,9 @@ export class MetricsTracker {
       attempt_number: result.attemptNumber,
       duration_ms: result.duration_ms,
       cost_usd: result.cost_usd,
+      prompt_tokens: result.usage?.prompt_tokens || 0,
+      completion_tokens: result.usage?.completion_tokens || 0,
+      total_tokens: result.usage?.total_tokens || 0,
       success: result.success,
       timestamp: formatTimestamp()
     };
@@ -150,8 +159,11 @@ export class MetricsTracker {
 
     agent.attempts.push(attempt);
 
-    // Update total cost (includes failed attempts)
+    // Update totals for the agent (includes failed attempts)
     agent.total_cost_usd = agent.attempts.reduce((sum, a) => sum + a.cost_usd, 0);
+    agent.prompt_tokens = agent.attempts.reduce((sum, a) => sum + a.prompt_tokens, 0);
+    agent.completion_tokens = agent.attempts.reduce((sum, a) => sum + a.completion_tokens, 0);
+    agent.total_tokens = agent.attempts.reduce((sum, a) => sum + a.total_tokens, 0);
 
     // If successful, update final metrics and status
     if (result.success) {
@@ -277,8 +289,26 @@ export class MetricsTracker {
       0
     );
 
+    const totalPromptTokens = successfulAgents.reduce(
+      (sum, [_, data]) => sum + data.prompt_tokens,
+      0
+    );
+
+    const totalCompletionTokens = successfulAgents.reduce(
+      (sum, [_, data]) => sum + data.completion_tokens,
+      0
+    );
+
+    const totalTokens = successfulAgents.reduce(
+      (sum, [_, data]) => sum + data.total_tokens,
+      0
+    );
+
     this.data.metrics.total_duration_ms = totalDuration;
     this.data.metrics.total_cost_usd = totalCost;
+    this.data.metrics.total_prompt_tokens = totalPromptTokens;
+    this.data.metrics.total_completion_tokens = totalCompletionTokens;
+    this.data.metrics.total_tokens = totalTokens;
 
     // Calculate phase-level metrics
     this.data.metrics.phases = this.calculatePhaseMetrics(successfulAgents);
@@ -355,11 +385,29 @@ export class MetricsTracker {
         0
       );
 
+      const phasePromptTokens = agentList.reduce(
+        (sum, agent) => sum + agent.prompt_tokens,
+        0
+      );
+
+      const phaseCompletionTokens = agentList.reduce(
+        (sum, agent) => sum + agent.completion_tokens,
+        0
+      );
+
+      const phaseTotalTokens = agentList.reduce(
+        (sum, agent) => sum + agent.total_tokens,
+        0
+      );
+
       phaseMetrics[phaseName] = {
         duration_ms: phaseDuration,
         duration_percentage: calculatePercentage(phaseDuration, totalDuration),
         cost_usd: phaseCost,
-        agent_count: agentList.length
+        agent_count: agentList.length,
+        prompt_tokens: phasePromptTokens,
+        completion_tokens: phaseCompletionTokens,
+        total_tokens: phaseTotalTokens
       };
     }
 

@@ -237,6 +237,8 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
   const skipSubfinder = envConfig?.dokodemodoor?.skipSubfinder || false;
   const skipWhatweb = envConfig?.dokodemodoor?.skipWhatweb || false;
   const skipSchemathesis = envConfig?.dokodemodoor?.skipSchemathesis || false;
+  const skipSemgrep = envConfig?.dokodemodoor?.skipSemgrep || false;
+  const skipOsv = envConfig?.dokodemodoor?.skipOsv || false;
 
   if (skipSchemathesis) {
     console.log(chalk.gray('    ⏭️  Skipping schemathesis (DOKODEMODOOR_SKIP_SCHEMATHESIS=true)'));
@@ -244,15 +246,22 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
     console.log(chalk.blue('    🛡️  Schemathesis scanning enabled (API fuzzing)'));
   }
 
+  if (skipSemgrep) {
+    console.log(chalk.gray('    ⏭️  Skipping semgrep (DOKODEMODOOR_SKIP_SEMGREP=true)'));
+  }
+  if (skipOsv) {
+    console.log(chalk.gray('    ⏭️  Skipping osv (DOKODEMODOOR_SKIP_OSV=true)'));
+  }
+
   if (useSequential) {
     console.log(chalk.blue('    → Running Wave 1 operations sequentially for best performance on local LLM...'));
 
-    let nmap, subfinder, whatweb, codeAnalysis;
+    let nmap, subfinder, whatweb, codeAnalysis, semgrep, osv;
 
     // Run Semgrep and OSV first to provide context for the code analysis agent
-    await Promise.all([
-      runSemgrepAnalysis(sourceDir),
-      runOSVAnalysis(sourceDir)
+    [semgrep, osv] = await Promise.all([
+      !skipSemgrep ? runSemgrepAnalysis(sourceDir) : Promise.resolve(buildSkippedResult('semgrep', 'DOKODEMODOOR_SKIP_SEMGREP=true')),
+      !skipOsv ? runOSVAnalysis(sourceDir) : Promise.resolve(buildSkippedResult('osv', 'DOKODEMODOOR_SKIP_OSV=true'))
     ]);
 
     // Nmap
@@ -302,7 +311,7 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
       { id: sessionId, webUrl }
     );
 
-    return { nmap, subfinder, whatweb, codeAnalysis };
+    return { nmap, subfinder, whatweb, codeAnalysis, semgrep, osv };
   }
 
   // Wave 1: Initial footprinting (Parallel)
@@ -310,9 +319,9 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
 
   // Run Semgrep and OSV first (sequentially before others) to ensure context for the AI agent
   // Even in parallel mode, this provides the "foundation" file
-  await Promise.all([
-    runSemgrepAnalysis(sourceDir),
-    runOSVAnalysis(sourceDir)
+  const [semgrep, osv] = await Promise.all([
+    !skipSemgrep ? runSemgrepAnalysis(sourceDir) : Promise.resolve(buildSkippedResult('semgrep', 'DOKODEMODOOR_SKIP_SEMGREP=true')),
+    !skipOsv ? runOSVAnalysis(sourceDir) : Promise.resolve(buildSkippedResult('osv', 'DOKODEMODOOR_SKIP_OSV=true'))
   ]);
 
   const operations = [];
@@ -373,8 +382,7 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
   );
 
   const [nmap, subfinder, whatweb, codeAnalysis] = await Promise.all(operations);
-
-  return { nmap, subfinder, whatweb, codeAnalysis };
+  return { nmap, subfinder, whatweb, codeAnalysis, semgrep, osv };
 }
 
 // Wave 2: Additional scanning
@@ -516,7 +524,7 @@ const dedupeEndpointLists = (content) => {
 
 // Pure function: Stitch together pre-recon outputs and save to file
 async function stitchPreReconOutputs(outputs, sourceDir) {
-  const [nmap, subfinder, whatweb, codeAnalysis, ...additionalScans] = outputs;
+  const [nmap, subfinder, whatweb, codeAnalysis, semgrep, osv, ...additionalScans] = outputs;
 
   // Read analysis deliverables
   let codeAnalysisContent = 'No analysis available';
@@ -530,8 +538,8 @@ async function stitchPreReconOutputs(outputs, sourceDir) {
   }
 
   // Build references instead of full content to save context
-  const semgrepContent = 'Detailed findings available in `deliverables/semgrep_analysis_deliverable.md`.';
-  const osvContent = 'Detailed findings available in `deliverables/osv_analysis_deliverable.md`.';
+  const semgrepContent = semgrep?.status === 'skipped' ? 'Skipped' : 'Detailed findings available in `deliverables/semgrep_analysis_deliverable.md`.';
+  const osvContent = osv?.status === 'skipped' ? 'Skipped' : 'Detailed findings available in `deliverables/osv_analysis_deliverable.md`.';
 
   // Build additional scans section
   let additionalSection = '';
@@ -629,8 +637,9 @@ export async function executePreReconPhase(webUrl, sourceDir, variables, config,
     wave1Results.nmap,
     wave1Results.subfinder,
     wave1Results.whatweb,
-
     wave1Results.codeAnalysis,
+    wave1Results.semgrep,
+    wave1Results.osv,
     ...(wave2Results.schemathesis ? [wave2Results.schemathesis] : [])
   ];
   const preReconReport = await stitchPreReconOutputs(allResults, sourceDir);

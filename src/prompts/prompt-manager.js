@@ -287,6 +287,7 @@ async function interpolateVariables(template, variables, config = null, baseDir 
       .replace(/{{VULNERABILITY_COUNT}}/g, variables.vulnerabilityCount || '0')
       .replace(/{{QUEUE_SUMMARY}}/g, variables.queueSummary || 'No queue summary available.')
       .replace(/{{SECURITY_CONTEXT}}/g, securityContext)
+      .replace(/{{EXTERNAL_TEST_DOMAIN}}/g, config?.dokodemodoor?.externalTestDomain || process.env.EXTERNAL_TEST_DOMAIN || 'http://attacker-controlled.com')
       .replace(/{{VLLM_MAX_TURNS}}/g, config?.llm?.vllm?.maxTurns || process.env.VLLM_MAX_TURNS || '100')
       .replace(/{{XSS_TEST}}/g, 'DOKODEMO_XSS_MARKER');
 

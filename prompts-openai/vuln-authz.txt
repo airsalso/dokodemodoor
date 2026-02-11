@@ -106,12 +106,13 @@ Repository Path: {{REPO_PATH}}
 
 ---
 
-### 3.5 Data Source Derivation (STRICT CATEGORY FILTERING)
+### 3.5 Data Source Derivation (MULTI-SOURCE SYNERGY)
 
-You MUST derive authorization test targets ONLY from authz‑relevant items:
-- `deliverables/recon_deliverable.md` → **Authorization Vulnerability Candidates** section (Section 8). **STRICTLY IGNORE** Table 4 (Endpoint Inventory) summaries or Section 9 (Injection Source) if they do not involve IDOR/Role checks.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: AUTHZ]** section. This is your primary target list.
-- `deliverables/code_analysis_deliverable.md` → Only the "Authorization Architecture" section.
+You MUST derive authorization test targets by correlating AuthZ‑relevant items from ALL available sources:
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: AUTHZ]**: Your primary high-confidence target list.
+- `deliverables/api_fuzzer_deliverable.md` → **Anomalies / 4xx Findings**: Check for "Forbidden" or "Unauthorized" responses that can be bypassed via IDOR or role-hopping.
+- `deliverables/recon_deliverable.md` → **Authorization Vulnerability Candidates**: Broad map of ownership/role-gated resources.
+- `{{SECURITY_CONTEXT}}` → **Semgrep AuthZ Hotspots**: Priority code-pointers for missing guards.
 
 **Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 

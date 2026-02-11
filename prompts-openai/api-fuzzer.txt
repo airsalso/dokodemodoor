@@ -23,6 +23,10 @@ Your mission is to enrich the current **Application Security Map** by performing
 
 @include(shared/_path-awareness.txt)
 
+**Additional Context (Semgrep Hotspots & OSV):**
+{{SECURITY_CONTEXT}}
+
+
 ### Recon Consistency (MANDATORY)
 - Prefer endpoints in `deliverables/recon_verify_deliverable.md`. If missing, use `deliverables/recon_deliverable.md`.
  - XSS candidates: only include endpoints where **input source + render context** are confirmed in recon/recon-verify. Otherwise label as **UNVERIFIED** and do not fuzz for XSS.

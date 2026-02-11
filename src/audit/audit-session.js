@@ -193,6 +193,9 @@ export class AuditSession {
         success: result.success,
         duration_ms: result.duration_ms,
         cost_usd: result.cost_usd,
+        prompt_tokens: result.usage?.prompt_tokens || 0,
+        completion_tokens: result.usage?.completion_tokens || 0,
+        total_tokens: result.usage?.total_tokens || 0,
         timestamp: formatTimestamp()
       });
 

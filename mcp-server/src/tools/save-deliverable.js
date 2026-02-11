@@ -100,12 +100,40 @@ export async function saveDeliverable(args) {
           const incomingJson = JSON.parse(content);
           const existingList = Array.isArray(existingJson?.vulnerabilities) ? existingJson.vulnerabilities : [];
           const incomingList = Array.isArray(incomingJson?.vulnerabilities) ? incomingJson.vulnerabilities : [];
+
+          // [SMART DEDUPLICATION]
+          // Use a combination of vulnerability_type and source as a unique key
+          const seenKeys = new Set();
+          const mergedList = [];
+
+          const addToList = (item) => {
+            if (!item || typeof item !== 'object') return;
+            // Create a normalization key: lowercase and strip whitespace
+            const sourceKey = String(item.source || '').toLowerCase().replace(/\s+/g, '');
+            const typeKey = String(item.vulnerability_type || '').toLowerCase();
+            const uniqueKey = `${typeKey}|${sourceKey}`;
+
+            if (!seenKeys.has(uniqueKey)) {
+              seenKeys.add(uniqueKey);
+              mergedList.push(item);
+              return true;
+            }
+            return false;
+          };
+
+          // Prioritize existing findings (don't overwrite unless necessary)
+          existingList.forEach(addToList);
+          let addedCount = 0;
+          incomingList.forEach(item => {
+            if (addToList(item)) addedCount++;
+          });
+
           finalContent = JSON.stringify(
-            { vulnerabilities: [...existingList, ...incomingList] },
+            { vulnerabilities: mergedList },
             null,
             2
           );
-          logQueueMerge(`[QUEUE MERGE] ${filename}: existing ${existingList.length} + incoming ${incomingList.length} = ${existingList.length + incomingList.length}`);
+          logQueueMerge(`[QUEUE MERGE] ${filename}: existing ${existingList.length} + new ${addedCount} (deduplicated) = ${mergedList.length}`);
         } catch (mergeError) {
           // If merge fails, fall back to incoming content
           finalContent = content;

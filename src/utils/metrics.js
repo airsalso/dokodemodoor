@@ -40,6 +40,14 @@ export const costResults = {
   total: 0
 };
 
+export const usageResults = {
+  agents: {},
+  prompt: 0,
+  completion: 0,
+  total: 0
+};
+
+
 // Function to display comprehensive timing summary
 /**
  * [목적] 실행 시간/비용 요약 출력.
@@ -104,6 +112,24 @@ export const displayTimingSummary = () => {
       console.log(chalk.green(`  ${displayName.padEnd(20)} $${cost.toFixed(4).padStart(8)}`));
     }
     console.log(chalk.gray(`  ${'Total Cost'.padEnd(20)} $${costResults.total.toFixed(4).padStart(8)}`));
+  }
+
+  // Usage breakdown
+  if (usageResults.total > 0) {
+    console.log(chalk.blue.bold('\n📊 Token Usage:'));
+
+    // Per-agent usage if available
+    if (Object.keys(usageResults.agents).length > 0) {
+      for (const [agent, usage] of Object.entries(usageResults.agents)) {
+        const displayName = agent.replace(/-/g, ' ');
+        console.log(chalk.blue(`  ${displayName.padEnd(20)} ${usage.total.toLocaleString().padStart(12)} tokens`));
+      }
+      console.log(chalk.gray('  ' + '─'.repeat(40)));
+    }
+
+    console.log(chalk.blue(`  Prompt Context:      ${usageResults.prompt.toLocaleString().padStart(12)} tokens`));
+    console.log(chalk.blue(`  Model Completion:    ${usageResults.completion.toLocaleString().padStart(12)} tokens`));
+    console.log(chalk.blue(`  Total Consumption:   ${usageResults.total.toLocaleString().padStart(12)} tokens`));
   }
 
   console.log(chalk.gray('─'.repeat(60)));

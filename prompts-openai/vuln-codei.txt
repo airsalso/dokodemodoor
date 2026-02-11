@@ -111,12 +111,13 @@ Repository Path: {{REPO_PATH}}
 
 ---
 
-### 3.4 Data Source Derivation (STRICT CATEGORY FILTERING)
+### 3.4 Data Source Derivation (MULTI-SOURCE SYNERGY)
 
-You MUST derive initial tasks ONLY from command/code/deserialization‑relevant items:
-- `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for Command/Code/Deserialization tables/rows only.** Ignore SQLI, XSS, SSRF, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: CODEI]** section. This is your primary target list. If that exact header is missing, use any CODEI‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
-- `deliverables/code_analysis_deliverable.md` → Only paths leading to execution sinks (eval, exec, etc.).
+You MUST derive initial tasks by correlating Code/Command execution‑relevant items from ALL available sources:
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: CODEI]**: Your primary high-confidence target list.
+- `deliverables/api_fuzzer_deliverable.md` → **Anomalies / 5xx Findings**: Check for crashes indicating shell injection errors or unhandled exceptions in execution primitives.
+- `deliverables/recon_deliverable.md` → **Injection Source Inventory**: Broad map of command/code execution sinks.
+- `{{SECURITY_CONTEXT}}` → **Semgrep CodeI Hotspots**: Priority code-pointers for shell exec, eval, or unsafe deserialization.
 
 **Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 

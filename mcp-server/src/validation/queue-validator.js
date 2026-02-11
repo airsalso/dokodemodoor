@@ -55,8 +55,37 @@
 */
 export function validateQueueJson(content) {
   try {
-    // [CONTROL CHARACTER DEFENSE] LLMs often include literal newlines or control chars in JSON strings.
-    // Replace literal newlines and other control characters (0-31) that are not escaped.
+    // [ROBUST JSON DEFENSE]
+    const preProcessJSON = (raw) => {
+      let cleaned = raw.trim();
+
+      // 1. Strip Markdown code blocks
+      if (cleaned.includes('```')) {
+        const matches = [...cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
+        if (matches.length > 0) {
+          cleaned = matches[matches.length - 1][1].trim();
+        }
+      }
+
+      // 2. Remove comments
+      cleaned = cleaned.replace(/\/\/.*/g, '');
+      cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
+
+      // 3. Handle ${{placeholder}} hallucination (outside of strings)
+      // If LLM tried to use a placeholder like ${{EXISTING_DATA}}, remove it and its comma if needed
+      // This regex looks for ${{...}} not enclosed in double quotes (best effort)
+      const placeholderRegex = /(?:,\s*)?\$\{\{[^}]+\}\}(?:\s*,)?/g;
+      cleaned = cleaned.replace(placeholderRegex, (match) => {
+        if (match.startsWith(',') && match.endsWith(',')) return ',';
+        return '';
+      });
+
+      // 4. Trailing commas
+      cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+      return cleaned;
+    };
+
     const sanitizeJSON = (s) => {
       // Find strings and replace literal control characters within them
       return s.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
@@ -69,7 +98,8 @@ export function validateQueueJson(content) {
       });
     };
 
-    const sanitizedContent = sanitizeJSON(content);
+    const cleanedContent = preProcessJSON(content);
+    const sanitizedContent = sanitizeJSON(cleanedContent);
     const parsed = JSON.parse(sanitizedContent);
 
     // Queue files must have a 'vulnerabilities' array

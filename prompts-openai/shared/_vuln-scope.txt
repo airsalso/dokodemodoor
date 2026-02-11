@@ -5,3 +5,27 @@
 - **Code-First**: Prefer code-based analysis for reachability and sink validation.
 - **Playwright ({{MCP_SERVER}})**: Use primarily for **verification** of behavior observed in code, not for broad discovery.
 - **curl (via bash)**: Use for raw HTTP/S packet analysis, direct protocol probing, and bypassing client-side validation during investigation.
+
+### 🔍 MULTI-SOURCE INTEL SYNERGY (MANDATORY)
+Do NOT rely solely on `recon_verify_deliverable.md`. To ensure maximum coverage, you MUST correlate findings from:
+1.  **`deliverables/recon_verify_deliverable.md`**: Primary, high-confidence targets.
+2.  **`deliverables/recon_deliverable.md`**: Broad tactical map. Scan all tables for candidates relevant to your category.
+3.  **`deliverables/api_fuzzer_deliverable.md`**: Pay close attention to **Anomalies / 4xx / 5xx Findings**. Fuzzing crashes or unusual errors often mask exploitable logic flaws.
+4.  **Static Analysis Hotspots**: Semgrep and OSV findings (see below).
+
+**Synergy Goal**: Use the fuzzer's errors and static analysis hotspots to discover paths that initial recon might have missed.
+
+### 💾 CUMULATIVE ANALYSIS & RESULTS MERGING
+If you see a **## EXISTING FINDINGS (Cumulative Analysis Mode)** section in your context:
+1.  **Deduplicate (STRICT)**: You MUST NOT re-analyze or re-report existing items. A "discovered" vulnerability is a duplicate if it shares the same **endpoint and parameter (source)** as an existing one.
+2.  **Turn Efficiency**: Do NOT waste LLM turns re-proving what is already proved. Immediately skip to the next candidate.
+3.  **Merge & Accumulate**: When saving your final deliverables (`*_ANALYSIS` and `*_QUEUE`), you **MUST** include both the newly discovered vulnerabilities and the existing ones.
+4.  **No Data Loss**: The final JSON queue must contain the full list (Old + New). Your final `save_deliverable` call will be merged by the engine, but you should still provide the complete set for consistency.
+
+**OUT-OF-BAND (OOB) POLICY:**
+- For any external interaction, outbound verification, or OOB testing (e.g., SSRF, SQLi OOB, Blind XSS), you **MUST ONLY** use the following domain:
+`{{EXTERNAL_TEST_DOMAIN}}`
+- **DO NOT** use any other external services (e.g., burpcollaborator, webhook.site) or arbitrary URLs.
+
+### 🛡️ STATIC ANALYSIS HOTSPOTS (Semgrep & OSV)
+{{SECURITY_CONTEXT}}

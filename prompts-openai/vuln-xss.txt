@@ -109,12 +109,13 @@ Repository Path: {{REPO_PATH}}
 
 ---
 
-### 3.4 Data Source Derivation (STRICT CATEGORY FILTERING)
+### 3.4 Data Source Derivation (MULTI-SOURCE SYNERGY)
 
-You MUST derive initial tasks ONLY from XSS‑relevant items:
-- `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for XSS/DOM/HTML tables/rows only.** Ignore SQLI, SSRF, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: XSS]** section. This is your primary target list. If that exact header is missing, use any XSS‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
-- `deliverables/code_analysis_deliverable.md` → Only paths leading to DOM/HTML sinks.
+You MUST derive initial tasks by correlating XSS‑relevant items from ALL available sources:
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: XSS]**: Your primary high-confidence target list.
+- `deliverables/api_fuzzer_deliverable.md` → **Anomalies / Findings**: Check if fuzzer payloads caused unusual render behavior or triggered info leaks.
+- `deliverables/recon_deliverable.md` → **Injection Source Inventory**: Broad map. Search for DOM sinks/HTML rendering.
+- `{{SECURITY_CONTEXT}}` → **Semgrep XSS Hotspots**: Absolute priority for code-level investigation.
 
 **Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 

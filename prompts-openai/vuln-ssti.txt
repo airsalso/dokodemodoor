@@ -109,12 +109,13 @@ Repository Path: {{REPO_PATH}}
 
 ---
 
-### 3.4 Data Source Derivation (STRICT CATEGORY FILTERING)
+### 3.4 Data Source Derivation (MULTI-SOURCE SYNERGY)
 
-You MUST derive initial tasks ONLY from template‑relevant items:
-- `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for SSTI/Template tables/rows only.** Ignore SQLI, XSS, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: SSTI]** section. This is your primary target list.
-- `deliverables/code_analysis_deliverable.md` → Only paths leading to template rendering sinks.
+You MUST derive initial tasks by correlating template‑relevant items from ALL available sources:
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: SSTI]**: Your primary high-confidence target list.
+- `deliverables/api_fuzzer_deliverable.md` → **Anomalies / Findings**: Check if fuzzing triggered unusual template errors or evaluation leaks.
+- `deliverables/recon_deliverable.md` → **Injection Source Inventory**: Broad map of template compilation/render sinks.
+- `{{SECURITY_CONTEXT}}` → **Semgrep SSTI Hotspots**: Priority code-pointers for unsafe render or compile calls.
 
 Then expand tasks only if:
 - new template render sinks are discovered during tracing, **and**

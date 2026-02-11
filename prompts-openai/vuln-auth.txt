@@ -106,12 +106,13 @@ Repository Path: {{REPO_PATH}}
 
 ---
 
-### 3.4 Data Source Derivation (STRICT CATEGORY FILTERING)
+### 3.4 Data Source Derivation (MULTI-SOURCE SYNERGY)
 
-You MUST derive all analysis targets ONLY from authentication‑relevant items:
-- `deliverables/recon_deliverable.md` → **Authentication & Session Management Flow** section. **FILTER for AuthN tables/rows only.** Ignore AuthZ, XSS, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: AUTH]** section. This is your primary target list. If that exact header is missing, use any Auth‑titled section; otherwise fall back to Authentication & Session Management Flow and record a recon gap.
-- `deliverables/code_analysis_deliverable.md` → Only sections regarding AuthN (Login logic, Token handling).
+You MUST derive all analysis targets by correlating authentication‑relevant items from ALL available sources:
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: AUTH]**: Your primary high-confidence target list.
+- `deliverables/api_fuzzer_deliverable.md` → **Anomalies / 4xx Findings**: Check for unusual auth errors or session-related leaks during fuzzing.
+- `deliverables/recon_deliverable.md` → **Authentication & Session Management Flow**: Broad map of login/reset/token flows.
+- `{{SECURITY_CONTEXT}}` → **Semgrep AuthN Hotspots**: Priority code-pointers for weak crypto or insecure session handling.
 
 **Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 

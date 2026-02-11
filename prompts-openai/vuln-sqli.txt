@@ -103,12 +103,13 @@ Repository Path: {{REPO_PATH}}
 
 ---
 
-### 3.4 Data Source derivation (STRICT CATEGORY FILTERING)
+### 3.4 Data Source derivation (MULTI-SOURCE SYNERGY)
 
-You MUST derive initial tasks ONLY from SQL/NoSQL‑relevant items:
-- `deliverables/recon_deliverable.md` → **Injection Source Inventory** section. **FILTER for SQL/NoSQL tables/rows only.** Ignore XSS, SSRF, CODEI, etc.
-- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: SQLI]** section. This is your primary target list. If that exact header is missing, use any SQLI‑titled section; otherwise fall back to Injection Source Inventory and record a recon gap.
-- `deliverables/code_analysis_deliverable.md` → Only paths leading to DB sinks.
+You MUST derive initial tasks by correlating SQL/NoSQL‑relevant items from ALL available sources:
+- `deliverables/recon_verify_deliverable.md` → **## [CATEGORY: SQLI]**: Your primary high-confidence target list.
+- `deliverables/api_fuzzer_deliverable.md` → **Anomalies / 5xx Findings**: Check if fuzzing crashes are caused by SQL syntax errors or unhandled DB exceptions.
+- `deliverables/recon_deliverable.md` → **Injection Source Inventory**: Broad map. Search for DB-related patterns.
+- `{{SECURITY_CONTEXT}}` → **Semgrep SQLi Hotspots**: Absolute priority for code-level investigation.
 
 **Exception to IGNORE-ARTIFACTS**: You MUST read the specific deliverables listed above. Do NOT read other deliverables.
 

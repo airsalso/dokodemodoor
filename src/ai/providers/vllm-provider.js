@@ -61,6 +61,8 @@ export class VLLMProvider extends LLMProvider {
     this.temperature = config.temperature || 0.1;
     this.maxTurns = config.maxTurns || 100;
     this.maxPromptChars = config.maxPromptChars || 32000;
+    this.promptTokenPrice = config.promptTokenPrice || 0;
+    this.completionTokenPrice = config.completionTokenPrice || 0;
   }
 
   /**
@@ -76,6 +78,16 @@ export class VLLMProvider extends LLMProvider {
   * - 문자열: 'vllm'.
   */
   getName() { return 'vllm'; }
+
+  /**
+   * Calculate cost based on token usage and configured prices.
+   */
+  calculateCost(usage) {
+    if (!usage) return 0;
+    const promptCost = (usage.prompt_tokens / 1000000) * this.promptTokenPrice;
+    const completionCost = (usage.completion_tokens / 1000000) * this.completionTokenPrice;
+    return promptCost + completionCost;
+  }
 
   /**
   * [목적] 런타임에 공급자 기능을 설명합니다.
@@ -799,6 +811,7 @@ export class VLLMProvider extends LLMProvider {
     const maxTurns = options.maxTurns || this.maxTurns;
     let allowGraceTurns = true; // Enabled by default to provide a safety buffer at the turn limit
     const startTime = Date.now();
+    let cumulativeUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
     // Semantic Loop Tracking
     let toolUsageHistory = [];
@@ -1040,6 +1053,12 @@ export class VLLMProvider extends LLMProvider {
         }
       }
 
+      if (response && response.usage) {
+        cumulativeUsage.prompt_tokens += response.usage.prompt_tokens || 0;
+        cumulativeUsage.completion_tokens += response.usage.completion_tokens || 0;
+        cumulativeUsage.total_tokens += response.usage.total_tokens || 0;
+      }
+
       if (!response) {
         throw new Error('vLLM Provider error: Failed to obtain response after tool-call JSON parse recovery.');
       }
@@ -1236,7 +1255,8 @@ export class VLLMProvider extends LLMProvider {
                     result: 'REPORTING COMPLETE',
                     subtype: 'success',
                     duration_ms: Date.now() - startTime,
-                    usage: response?.usage
+                    usage: cumulativeUsage,
+                    total_cost_usd: this.calculateCost(cumulativeUsage)
                   };
                   return;
                 }
@@ -1320,7 +1340,7 @@ export class VLLMProvider extends LLMProvider {
            }
            messages.push(message);
            finished = true;
-           yield { type: 'result', result: content, subtype: 'success', duration_ms: Date.now() - startTime, usage: response.usage };
+           yield { type: 'result', result: content, subtype: 'success', duration_ms: Date.now() - startTime, usage: cumulativeUsage, total_cost_usd: this.calculateCost(cumulativeUsage) };
            break;
         }
       } catch (error) {

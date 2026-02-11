@@ -42,7 +42,13 @@ You MUST begin by fully reading:
 `deliverables/pre_recon_deliverable.md`
 
 This is **baseline, hypothesis-level intelligence**. Do not re-discover what already exists there—**extend and validate it**.
+Specifically, you MUST analyze the **Static Analysis Hotspots (Semgrep)** and **Open Source Vulnerabilities (OSV)** findings provided in the `{{SECURITY_CONTEXT}}` below. These findings often point to the most vulnerable entrance and architecture.
+
 You MUST verify any file path before citing it. If you cannot verify, mark it **Unverified** and do not treat it as authoritative.
+
+---
+
+{{SECURITY_CONTEXT}}
 
 ---
 

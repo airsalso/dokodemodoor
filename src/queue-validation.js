@@ -156,7 +156,51 @@ const validateExistenceRules = (pathsWithExistence) => {
  */
 const validateQueueStructure = (content) => {
   try {
-    const parsed = JSON.parse(content);
+    // [ROBUST JSON DEFENSE]
+    const preProcessJSON = (raw) => {
+      let cleaned = raw.trim();
+
+      // 1. Strip Markdown code blocks
+      if (cleaned.includes('```')) {
+        const matches = [...cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
+        if (matches.length > 0) {
+          cleaned = matches[matches.length - 1][1].trim();
+        }
+      }
+
+      // 2. Remove comments
+      cleaned = cleaned.replace(/\/\/.*/g, '');
+      cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
+
+      // 3. Handle ${{placeholder}} hallucination (outside of strings)
+      const placeholderRegex = /(?:,\s*)?\$\{\{[^}]+\}\}(?:\s*,)?/g;
+      cleaned = cleaned.replace(placeholderRegex, (match) => {
+        if (match.startsWith(',') && match.endsWith(',')) return ',';
+        return '';
+      });
+
+      // 4. Trailing commas
+      cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+      return cleaned;
+    };
+
+    const sanitizeJSON = (s) => {
+      // Find strings and replace literal control characters within them
+      return s.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
+        return match.replace(/[\x00-\x1F]/g, (c) => {
+          if (c === '\n') return '\\n';
+          if (c === '\r') return '\\r';
+          if (c === '\t') return '\\t';
+          return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+        });
+      });
+    };
+
+    const cleanedContent = preProcessJSON(content);
+    const sanitizedContent = sanitizeJSON(cleanedContent);
+    const parsed = JSON.parse(sanitizedContent);
+
     return Object.freeze({
       valid: parsed.vulnerabilities && Array.isArray(parsed.vulnerabilities),
       data: parsed,

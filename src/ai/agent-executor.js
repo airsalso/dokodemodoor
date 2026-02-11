@@ -10,7 +10,7 @@ import { config as envConfig, isVLLMProvider } from '../config/env.js';
 import { runWithContext } from '../utils/context.js';
 import { isRetryableError, getRetryDelay, PentestError } from '../error-handling.js';
 import { ProgressIndicator } from '../progress-indicator.js';
-import { timingResults, costResults, Timer } from '../utils/metrics.js';
+import { timingResults, costResults, usageResults, Timer } from '../utils/metrics.js';
 import { formatDuration } from '../audit/utils.js';
 import { createGitCheckpoint, commitGitSuccess, rollbackGitWorkspace, getGitHeadHash } from '../utils/git-manager.js';
 import { AGENT_VALIDATORS, MCP_AGENT_MAPPING, PHASE_TOOL_REQUIREMENTS, AGENT_TOOL_OVERRIDES } from '../constants.js';
@@ -308,7 +308,9 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
   const timer = new Timer(`agent-${description.toLowerCase().replace(/\s+/g, '-')}`);
   const fullPrompt = context ? `${context}\n\n${prompt}` : prompt;
   let totalCost = 0;
+  let totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   let partialCost = 0; // Track partial cost for crash safety
+  let partialUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
   // Auto-detect execution mode to adjust logging behavior
   const isParallelExecution = description.includes('vuln agent') || description.includes('exploit agent');
@@ -659,7 +661,8 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
                 // Clean completion output - just duration and cost
                 console.log(chalk.magenta(`\n    🏁 COMPLETED:`));
                 const cost = message.total_cost_usd || 0;
-                console.log(chalk.gray(`    ⏱️  Duration: ${(message.duration_ms/1000).toFixed(1)}s, Cost: $${cost.toFixed(4)}`));
+                const tokens = message.usage?.total_tokens || 0;
+                console.log(chalk.gray(`    ⏱️  Duration: ${(message.duration_ms/1000).toFixed(1)}s, Tokens: ${tokens.toLocaleString()}, Cost: $${cost.toFixed(4)}`));
 
                 if (message.subtype === "error_max_turns") {
                   console.log(chalk.red(`    ⚠️  Stopped: Hit maximum turns limit`));
@@ -675,7 +678,8 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
                 // Full completion output for agents without clean output
                 console.log(chalk.magenta(`\n    🏁 COMPLETED:`));
                 const cost = message.total_cost_usd || 0;
-                console.log(chalk.gray(`    ⏱️  Duration: ${(message.duration_ms/1000).toFixed(1)}s, Cost: $${cost.toFixed(4)}`));
+                const tokens = message.usage?.total_tokens || 0;
+                console.log(chalk.gray(`    ⏱️  Duration: ${(message.duration_ms/1000).toFixed(1)}s, Tokens: ${tokens.toLocaleString()}, Cost: $${cost.toFixed(4)}`));
 
                 if (message.subtype === "error_max_turns") {
                   console.log(chalk.red(`    ⚠️  Stopped: Hit maximum turns limit`));
@@ -701,13 +705,26 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
 
             // Track cost for all agents
             const cost = message.total_cost_usd || 0;
+            const usage = message.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
             const agentKey = description.toLowerCase().replace(/\s+/g, '-');
             costResults.agents[agentKey] = cost;
             costResults.total += cost;
 
+            // Track usage for breakdown
+            usageResults.agents[agentKey] = {
+              prompt: usage.prompt_tokens,
+              completion: usage.completion_tokens,
+              total: usage.total_tokens
+            };
+            usageResults.prompt += usage.prompt_tokens;
+            usageResults.completion += usage.completion_tokens;
+            usageResults.total += usage.total_tokens;
+
             // Store cost for return value and partial tracking
             totalCost = cost;
+            totalUsage = message.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
             partialCost = cost;
+            partialUsage = totalUsage;
             break;
           } else {
             // Log any other message types we might not be handling
@@ -761,7 +778,9 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
       duration,
       turns: turnCount,
       cost: totalCost,
+      usage: totalUsage,
       partialCost, // Include partial cost for crash recovery
+      partialUsage,
       apiErrorDetected
     };
     if (logFilePath) {
@@ -957,6 +976,7 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
               attemptNumber: attempt,
               duration_ms: result.duration,
               cost_usd: result.cost || 0,
+              usage: result.usage,
               success: true,
               checkpoint: commitHash
             });
@@ -990,6 +1010,7 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
               attemptNumber: attempt,
               duration_ms: result.duration,
               cost_usd: result.partialCost || result.cost || 0,
+              usage: result.partialUsage || result.usage,
               success: false,
               error: 'Output validation failed',
               isFinalAttempt: attempt === maxRetries
@@ -1029,6 +1050,7 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
           attemptNumber: attempt,
           duration_ms: error.duration || 0,
           cost_usd: error.cost || 0,
+          usage: error.usage,
           success: false,
           error: error.message,
           isFinalAttempt: attempt === maxRetries

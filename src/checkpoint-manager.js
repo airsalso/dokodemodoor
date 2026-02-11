@@ -618,6 +618,28 @@ const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadP
         }
       }
 
+      // 4. Load Existing Vulnerability Queue (for vuln agents during rerun/resumption)
+      if (agentName.includes('-vuln')) {
+        const vulnType = agentName.replace('-vuln', '');
+        const queuePath = path.join(deliverablesDir, `${vulnType}_exploitation_queue.json`);
+
+        if (await fs.pathExists(queuePath)) {
+          try {
+            const queueData = await fs.readJson(queuePath);
+            const count = queueData.vulnerabilities?.length || 0;
+            if (count > 0) {
+              findings += `## EXISTING FINDINGS (Cumulative Analysis Mode)\n`;
+              findings += `The following **${count}** vulnerabilities were already discovered in previous runs/sessions:\n`;
+              findings += `\`\`\`json\n${JSON.stringify(queueData, null, 2)}\n\`\`\`\n\n`;
+              findings += `**MISSION**: Focus on discovering ADDITIONAL vulnerabilities. Do NOT re-trace or re-prove the items listed above. When you save your final deliverables, you MUST merge these existing findings with your new discoveries. The final output must be cumulative.\n\n`;
+              console.log(chalk.blue(`   ♻️  Injected ${count} existing findings for cumulative analysis`));
+            }
+          } catch (e) {
+            // Silently continue if queue is unreadable or malformed
+          }
+        }
+      }
+
       if (findings) {
       const contextLabel = agentName === 'api-fuzzer'
         ? 'RECONNAISSANCE FINDINGS (STARTING POINT)'
