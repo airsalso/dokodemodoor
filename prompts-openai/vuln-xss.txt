@@ -338,6 +338,8 @@ If none found → `{ "vulnerabilities": [] }`
 }
 ```
 
+@include(shared/_json-hygiene.txt)
+
 **Inclusion Rule:** ONLY include items with `externally_exploitable: true` and `verdict: "vulnerable"`.
 
 ---

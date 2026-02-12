@@ -359,6 +359,8 @@ Each vulnerability object MUST follow this exact format:
 }
 ```
 
+@include(shared/_json-hygiene.txt)
+
 **Inclusion Rule:** ONLY include items with `externally_exploitable: true`.
 
 ---

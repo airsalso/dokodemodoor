@@ -884,17 +884,23 @@ const runParallelVuln = async (session, runAgentPromptWithRetry, loadPrompt) => 
   console.log();
 
   const startTime = Date.now();
+  const { config } = await import('./config/env.js');
+  const parallelLimit = config.dokodemodoor.parallelLimit || 5;
+  const results = [];
 
-  // Collect all results without logging individual completions
-  const results = await Promise.allSettled(
-    activeAgents.map(async (agentName, index) => {
-      // Add 2-second stagger to prevent API overwhelm
-      await new Promise(resolve => setTimeout(resolve, index * 2000));
+  // Run in chunks to respect parallelLimit
+  for (let i = 0; i < activeAgents.length; i += parallelLimit) {
+    const chunk = activeAgents.slice(i, i + parallelLimit);
+    console.log(chalk.gray(`    ⚡ Running chunk ${Math.floor(i / parallelLimit) + 1} (${chunk.join(', ')})`));
 
-      const result = await runSingleAgent(agentName, currentSession, runAgentPromptWithRetry, loadPrompt, false, true);
-      return { agentName, ...result, attempts: result.result?.turns >= 1 ? 1 : 1 }; // runSingleAgent handles attempts internally
-    })
-  );
+    const chunkResults = await Promise.allSettled(
+      chunk.map(async (agentName) => {
+        const result = await runSingleAgent(agentName, currentSession, runAgentPromptWithRetry, loadPrompt, false, true);
+        return { agentName, ...result, attempts: 1 };
+      })
+    );
+    results.push(...chunkResults);
+  }
 
   const totalDuration = Date.now() - startTime;
 
@@ -1054,71 +1060,37 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
   console.log();
 
   const startTime = Date.now();
+  const { config } = await import('./config/env.js');
+  const parallelLimit = config.dokodemodoor.parallelLimit || 5;
+  const results = [];
 
-  // Collect all results without logging individual completions
-  const results = await Promise.allSettled(
-    activeAgents.map(async (agentName, index) => {
-      // Add 2-second stagger to prevent API overwhelm
-      await new Promise(resolve => setTimeout(resolve, index * 2000));
+  // Run in chunks to respect parallelLimit
+  for (let i = 0; i < activeAgents.length; i += parallelLimit) {
+    const chunk = activeAgents.slice(i, i + parallelLimit);
+    console.log(chalk.gray(`    ⚡ Running chunk ${Math.floor(i / parallelLimit) + 1} (${chunk.join(', ')})`));
 
-      // Load queue data for this exploitation agent
-      let queueData = null;
-      try {
-        // One-to-one mapping for all agents
-        const vulnType = agentName.replace('-exploit', '');
-        const queuePath = path.join(freshSession.targetRepo, 'deliverables', `${vulnType}_exploitation_queue.json`);
-
-        if (await fs.pathExists(queuePath)) {
-          const queueContent = await fs.readFile(queuePath, 'utf8');
-          queueData = JSON.parse(queueContent);
-        }
-      } catch (error) {
-        console.log(chalk.yellow(`⚠️  Failed to load queue data for ${agentName}: ${error.message}`));
-      }
-
-      // Retry logic for exploitation agents (max 3 attempts)
-      let attempts = 0;
-      let lastError = null;
-      let result = null;
-      const maxAttempts = 3;
-
-      while (attempts < maxAttempts) {
-        attempts++;
+    const chunkResults = await Promise.allSettled(
+      chunk.map(async (agentName) => {
+        // Load queue data for this exploitation agent
+        let queueData = null;
         try {
-          // Run agent with queue data passed as additional context
-          result = await runSingleAgent(
-            agentName,
-            freshSession,
-            runAgentPromptWithRetry,
-            loadPrompt,
-            false,
-            true,
-            queueData  // Pass queue data to agent
-          );
+          const vulnType = agentName.replace('-exploit', '');
+          const queuePath = path.join(freshSession.targetRepo, 'deliverables', `${vulnType}_exploitation_queue.json`);
 
-          // Success - break out of retry loop
-          break;
-        } catch (error) {
-          lastError = error;
-
-          if (attempts < maxAttempts) {
-            console.log(chalk.yellow(`⚠️  ${agentName} attempt ${attempts}/${maxAttempts} failed: ${error.message}`));
-            console.log(chalk.yellow(`   Retrying in 5 seconds...`));
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          } else {
-            console.log(chalk.red(`❌ ${agentName} failed after ${maxAttempts} attempts`));
+          if (await fs.pathExists(queuePath)) {
+            const queueContent = await fs.readFile(queuePath, 'utf8');
+            queueData = JSON.parse(queueContent);
           }
+        } catch (error) {
+          console.log(chalk.yellow(`    ⚠️  Failed to load queue for ${agentName}: ${error.message}`));
         }
-      }
 
-      // If all attempts failed, throw the last error
-      if (!result) {
-        throw lastError || new Error('All exploitation attempts failed');
-      }
-
-      return { agentName, ...result, attempts };
-    })
-  );
+        const result = await runSingleAgent(agentName, freshSession, runAgentPromptWithRetry, loadPrompt, false, true, queueData);
+        return { agentName, ...result, attempts: result.attempts || 1 };
+      })
+    );
+    results.push(...chunkResults);
+  }
 
   const totalDuration = Date.now() - startTime;
 

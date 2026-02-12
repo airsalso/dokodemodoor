@@ -54,102 +54,177 @@
 * - 각 취약점 항목에 대해 심각도(Critical | High | Medium | Low)를 적용합니다.
 */
 export function validateQueueJson(content) {
-  try {
-    // [ROBUST JSON DEFENSE]
-    const preProcessJSON = (raw) => {
-      let cleaned = raw.trim();
+  // [ROBUST JSON DEFENSE HELPERS]
+  const preProcessJSON = (raw) => {
+    let cleaned = raw.trim();
 
-      // 1. Strip Markdown code blocks
-      if (cleaned.includes('```')) {
-        const matches = [...cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
-        if (matches.length > 0) {
-          cleaned = matches[matches.length - 1][1].trim();
+    // 1. Strip Markdown code blocks
+    if (cleaned.includes('```')) {
+      const matches = [...cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
+      if (matches.length > 0) {
+        cleaned = matches[matches.length - 1][1].trim();
+      }
+    }
+
+    // 2. Remove comments
+    cleaned = cleaned.replace(/\/\/.*/g, '');
+    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // 3. Handle ${{placeholder}} hallucination (outside of strings)
+    const placeholderRegex = /(?:,\s*)?\$\{\{[^}]+\}\}(?:\s*,)?/g;
+    cleaned = cleaned.replace(placeholderRegex, (match) => {
+      if (match.startsWith(',') && match.endsWith(',')) return ',';
+      return '';
+    });
+
+    // 4. Trailing commas
+    cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+    return cleaned;
+  };
+
+  const sanitizeJSON = (s) => {
+    // Find strings and replace literal control characters within them
+    return s.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
+      let sanitized = match.replace(/[\x00-\x1F]/g, (c) => {
+        if (c === '\n') return '\\n';
+        if (c === '\r') return '\\r';
+        if (c === '\t') return '\\t';
+        return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+      });
+      // Escape invalid backslashes (e.g., in Windows paths or incomplete escapes)
+      sanitized = sanitized.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+      return sanitized;
+    });
+  };
+
+  const repairJSON = (s) => {
+    let repaired = s.trim();
+
+    // 1. Fix missing commas between objects/arrays at the same level
+    repaired = repaired.replace(/([}\]])\s*([{\[])/g, '$1, $2');
+
+    // 2. Fix missing commas between key-value pairs
+    // Matches: "value" "key": or 123 "key":
+    repaired = repaired.replace(/("(?:\\[\s\S]|[^"])*"|[0-9\.]+|true|false|null)\s+("(?:\\[\s\S]|[^"])*"\s*:)/g, '$1, $2');
+
+    // 3. Fix comma instead of colon for common keys in queue files
+    const commonKeys = ['ID', 'vulnerability_type', 'vulnerability_id', 'severity', 'verdict', 'type', 'description', 'source', 'url_path', 'parameters', 'recommendation'];
+    commonKeys.forEach(key => {
+      const reg = new RegExp(`("${key}")\\s*,\\s*`, 'g');
+      repaired = repaired.replace(reg, '$1: ');
+    });
+
+    // 4. Auto-close unterminated strings
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < repaired.length; i++) {
+      const ch = repaired[i];
+      if (ch === '"' && !escaped) {
+        inString = !inString;
+      }
+      escaped = (ch === '\\' && !escaped);
+    }
+    if (inString) repaired += '"';
+
+    // 5. Balance braces and brackets
+    const stack = [];
+    inString = false;
+    escaped = false;
+    for (let i = 0; i < repaired.length; i++) {
+      const ch = repaired[i];
+      if (ch === '"' && !escaped) {
+        inString = !inString;
+      }
+      escaped = (ch === '\\' && !escaped);
+
+      if (!inString) {
+        if (ch === '{' || ch === '[') {
+          stack.push(ch);
+        } else if (ch === '}' || ch === ']') {
+          const last = stack[stack.length - 1];
+          if ((ch === '}' && last === '{') || (ch === ']' && last === '[')) {
+            stack.pop();
+          }
         }
       }
-
-      // 2. Remove comments
-      cleaned = cleaned.replace(/\/\/.*/g, '');
-      cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
-
-      // 3. Handle ${{placeholder}} hallucination (outside of strings)
-      // If LLM tried to use a placeholder like ${{EXISTING_DATA}}, remove it and its comma if needed
-      // This regex looks for ${{...}} not enclosed in double quotes (best effort)
-      const placeholderRegex = /(?:,\s*)?\$\{\{[^}]+\}\}(?:\s*,)?/g;
-      cleaned = cleaned.replace(placeholderRegex, (match) => {
-        if (match.startsWith(',') && match.endsWith(',')) return ',';
-        return '';
-      });
-
-      // 4. Trailing commas
-      cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
-
-      return cleaned;
-    };
-
-    const sanitizeJSON = (s) => {
-      // Find strings and replace literal control characters within them
-      return s.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
-        return match.replace(/[\x00-\x1F]/g, (c) => {
-          if (c === '\n') return '\\n';
-          if (c === '\r') return '\\r';
-          if (c === '\t') return '\\t';
-          return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
-        });
-      });
-    };
-
-    const cleanedContent = preProcessJSON(content);
-    const sanitizedContent = sanitizeJSON(cleanedContent);
-    const parsed = JSON.parse(sanitizedContent);
-
-    // Queue files must have a 'vulnerabilities' array
-    if (!parsed.vulnerabilities) {
-      return {
-        valid: false,
-        message: `Invalid queue structure: Missing 'vulnerabilities' property. Expected: {"vulnerabilities": [...]}`,
-      };
+    }
+    while (stack.length > 0) {
+      const last = stack.pop();
+      repaired += (last === '{' ? '}' : ']');
     }
 
-    if (!Array.isArray(parsed.vulnerabilities)) {
-      return {
-        valid: false,
-        message: `Invalid queue structure: 'vulnerabilities' must be an array. Expected: {"vulnerabilities": [...]}`,
-      };
+    return repaired;
+  };
+
+  // [MULTI-STAGE REPAIR STRATEGY]
+  let parsed = null;
+  let lastError = null;
+  const attempts = [
+    (c) => sanitizeJSON(preProcessJSON(c)),
+    (c) => repairJSON(sanitizeJSON(preProcessJSON(c))),
+    (c) => repairJSON(preProcessJSON(c))
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const processed = attempt(content);
+      parsed = JSON.parse(processed);
+      if (parsed && typeof parsed === 'object') break;
+    } catch (e) {
+      lastError = e.message;
     }
+  }
 
-    const allowedSeverities = new Set(['Critical', 'High', 'Medium', 'Low']);
-    for (let i = 0; i < parsed.vulnerabilities.length; i++) {
-      const entry = parsed.vulnerabilities[i];
-      if (!entry || typeof entry !== 'object') {
-        return {
-          valid: false,
-          message: `Invalid queue structure: vulnerabilities[${i}] must be an object.`,
-        };
-      }
-
-      if (entry.severity && typeof entry.severity === 'string') {
-        const normalized = entry.severity.charAt(0).toUpperCase() + entry.severity.slice(1).toLowerCase();
-        if (allowedSeverities.has(normalized)) {
-          entry.severity = normalized; // Normalize in-place
-        }
-      }
-
-      if (!entry.severity || !allowedSeverities.has(entry.severity)) {
-        return {
-          valid: false,
-          message: `Invalid queue structure: vulnerabilities[${i}].severity must be one of Critical, High, Medium, Low (received: ${entry.severity}).`,
-        };
-      }
-    }
-
-    return {
-      valid: true,
-      data: parsed,
-    };
-  } catch (error) {
+  if (!parsed || typeof parsed !== 'object') {
     return {
       valid: false,
-      message: `Invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      message: `Invalid JSON: ${lastError || 'Parsing failed after multiple repair attempts'}`,
     };
   }
+
+  // Queue files must have a 'vulnerabilities' array
+  if (!parsed.vulnerabilities) {
+    return {
+      valid: false,
+      message: `Invalid queue structure: Missing 'vulnerabilities' property. Expected: {"vulnerabilities": [...]}`,
+    };
+  }
+
+  if (!Array.isArray(parsed.vulnerabilities)) {
+    return {
+      valid: false,
+      message: `Invalid queue structure: 'vulnerabilities' must be an array. Expected: {"vulnerabilities": [...]}`,
+    };
+  }
+
+  const allowedSeverities = new Set(['Critical', 'High', 'Medium', 'Low']);
+  for (let i = 0; i < parsed.vulnerabilities.length; i++) {
+    const entry = parsed.vulnerabilities[i];
+    if (!entry || typeof entry !== 'object') {
+      return {
+        valid: false,
+        message: `Invalid queue structure: vulnerabilities[${i}] must be an object.`,
+      };
+    }
+
+    if (entry.severity && typeof entry.severity === 'string') {
+      const normalized = entry.severity.charAt(0).toUpperCase() + entry.severity.slice(1).toLowerCase();
+      if (allowedSeverities.has(normalized)) {
+        entry.severity = normalized; // Normalize in-place
+      }
+    }
+
+    if (!entry.severity || !allowedSeverities.has(entry.severity)) {
+      return {
+        valid: false,
+        message: `Invalid queue structure: vulnerabilities[${i}].severity must be one of Critical, High, Medium, Low (received: ${entry.severity}).`,
+      };
+    }
+  }
+
+  return {
+    valid: true,
+    data: parsed,
+  };
 }

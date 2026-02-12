@@ -155,64 +155,138 @@ const validateExistenceRules = (pathsWithExistence) => {
  * - validateQueueContent()
  */
 const validateQueueStructure = (content) => {
-  try {
-    // [ROBUST JSON DEFENSE]
-    const preProcessJSON = (raw) => {
-      let cleaned = raw.trim();
+  // [ROBUST JSON DEFENSE HELPERS]
+  const preProcessJSON = (raw) => {
+    let cleaned = raw.trim();
 
-      // 1. Strip Markdown code blocks
-      if (cleaned.includes('```')) {
-        const matches = [...cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
-        if (matches.length > 0) {
-          cleaned = matches[matches.length - 1][1].trim();
+    // 1. Strip Markdown code blocks
+    if (cleaned.includes('```')) {
+      const matches = [...cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
+      if (matches.length > 0) {
+        cleaned = matches[matches.length - 1][1].trim();
+      }
+    }
+
+    // 2. Remove comments
+    cleaned = cleaned.replace(/\/\/.*/g, '');
+    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // 3. Handle ${{placeholder}} hallucination (outside of strings)
+    const placeholderRegex = /(?:,\s*)?\$\{\{[^}]+\}\}(?:\s*,)?/g;
+    cleaned = cleaned.replace(placeholderRegex, (match) => {
+      if (match.startsWith(',') && match.endsWith(',')) return ',';
+      return '';
+    });
+
+    // 4. Trailing commas
+    cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+    return cleaned;
+  };
+
+  const sanitizeJSON = (s) => {
+    // Find strings and replace literal control characters within them
+    return s.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
+      let sanitized = match.replace(/[\x00-\x1F]/g, (c) => {
+        if (c === '\n') return '\\n';
+        if (c === '\r') return '\\r';
+        if (c === '\t') return '\\t';
+        return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+      });
+      // Escape invalid backslashes (e.g., in Windows paths or incomplete escapes)
+      sanitized = sanitized.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+      return sanitized;
+    });
+  };
+
+  const repairJSON = (s) => {
+    let repaired = s.trim();
+
+    // 1. Fix missing commas between objects/arrays at the same level
+    repaired = repaired.replace(/([}\]])\s*([{\[])/g, '$1, $2');
+
+    // 2. Fix missing commas between key-value pairs
+    // Matches: "value" "key": or 123 "key":
+    repaired = repaired.replace(/("(?:\\[\s\S]|[^"])*"|[0-9\.]+|true|false|null)\s+("(?:\\[\s\S]|[^"])*"\s*:)/g, '$1, $2');
+
+    // 3. Fix comma instead of colon for common keys in queue files
+    const commonKeys = ['ID', 'vulnerability_type', 'vulnerability_id', 'severity', 'verdict', 'type', 'description', 'source', 'url_path', 'parameters', 'recommendation'];
+    commonKeys.forEach(key => {
+      const reg = new RegExp(`("${key}")\\s*,\\s*`, 'g');
+      repaired = repaired.replace(reg, '$1: ');
+    });
+
+    // 4. Auto-close unterminated strings
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < repaired.length; i++) {
+      const ch = repaired[i];
+      if (ch === '"' && !escaped) {
+        inString = !inString;
+      }
+      escaped = (ch === '\\' && !escaped);
+    }
+    if (inString) repaired += '"';
+
+    // 5. Balance braces and brackets
+    const stack = [];
+    inString = false;
+    escaped = false;
+    for (let i = 0; i < repaired.length; i++) {
+      const ch = repaired[i];
+      if (ch === '"' && !escaped) {
+        inString = !inString;
+      }
+      escaped = (ch === '\\' && !escaped);
+
+      if (!inString) {
+        if (ch === '{' || ch === '[') {
+          stack.push(ch);
+        } else if (ch === '}' || ch === ']') {
+          const last = stack[stack.length - 1];
+          if ((ch === '}' && last === '{') || (ch === ']' && last === '[')) {
+            stack.pop();
+          }
         }
       }
+    }
+    while (stack.length > 0) {
+      const last = stack.pop();
+      repaired += (last === '{' ? '}' : ']');
+    }
 
-      // 2. Remove comments
-      cleaned = cleaned.replace(/\/\/.*/g, '');
-      cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
+    return repaired;
+  };
 
-      // 3. Handle ${{placeholder}} hallucination (outside of strings)
-      const placeholderRegex = /(?:,\s*)?\$\{\{[^}]+\}\}(?:\s*,)?/g;
-      cleaned = cleaned.replace(placeholderRegex, (match) => {
-        if (match.startsWith(',') && match.endsWith(',')) return ',';
-        return '';
-      });
+  // [MULTI-STAGE REPAIR STRATEGY]
+  let lastError = null;
+  const attempts = [
+    (c) => sanitizeJSON(preProcessJSON(c)),
+    (c) => repairJSON(sanitizeJSON(preProcessJSON(c))),
+    (c) => repairJSON(preProcessJSON(c))
+  ];
 
-      // 4. Trailing commas
-      cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
-
-      return cleaned;
-    };
-
-    const sanitizeJSON = (s) => {
-      // Find strings and replace literal control characters within them
-      return s.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
-        return match.replace(/[\x00-\x1F]/g, (c) => {
-          if (c === '\n') return '\\n';
-          if (c === '\r') return '\\r';
-          if (c === '\t') return '\\t';
-          return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+  for (const attempt of attempts) {
+    try {
+      const processed = attempt(content);
+      const parsed = JSON.parse(processed);
+      if (parsed && typeof parsed === 'object') {
+        return Object.freeze({
+          valid: parsed.vulnerabilities && Array.isArray(parsed.vulnerabilities),
+          data: parsed,
+          error: null
         });
-      });
-    };
-
-    const cleanedContent = preProcessJSON(content);
-    const sanitizedContent = sanitizeJSON(cleanedContent);
-    const parsed = JSON.parse(sanitizedContent);
-
-    return Object.freeze({
-      valid: parsed.vulnerabilities && Array.isArray(parsed.vulnerabilities),
-      data: parsed,
-      error: null
-    });
-  } catch (parseError) {
-    return Object.freeze({
-      valid: false,
-      data: null,
-      error: parseError.message
-    });
+      }
+    } catch (e) {
+      lastError = e.message;
+    }
   }
+
+  return Object.freeze({
+    valid: false,
+    data: null,
+    error: lastError || 'JSON parsing failed after multiple repair attempts'
+  });
 };
 
 // Pure function to read and validate queue content

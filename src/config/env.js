@@ -124,7 +124,10 @@ export const config = {
     skipExploitation: parseBoolean(process.env.DOKODEMODOOR_SKIP_EXPLOITATION, false),
 
     // Playwright Configuration
-    playwrightHeadless: parseBoolean(process.env.DOKODEMODOOR_PLAYWRIGHT_HEADLESS, true)
+    playwrightHeadless: parseBoolean(process.env.DOKODEMODOOR_PLAYWRIGHT_HEADLESS, true),
+
+    // Concurrency control for parallel phases (vuln, exploit)
+    parallelLimit: parseIntDecimal(process.env.DOKODEMODOOR_PARALLEL_LIMIT, 5)
   }
 };
 

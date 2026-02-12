@@ -1,0 +1,28 @@
+## 🛡️ JSON HYGIENE RULES (STRICT COMPLIANCE)
+
+To prevent JSON parsing errors that block system execution, you MUST follow these rules when generating the `*_QUEUE` deliverable:
+
+1. **STRING ESCAPING**:
+   - ALL double quotes inside a string value MUST be escaped: `\"`. (e.g., `"description": "Used \"eval()\" function"`)
+   - ALL backslashes inside a string value MUST be escaped: `\\`. (e.g., `"path": "src\\controllers\\auth.ts"`)
+   - If you include code snippets or payloads, ensure every single quote or special character is handled according to JSON standards.
+
+2. **NO NEWLINES IN VALUES**:
+   - Property values MUST NOT contain literal carriage returns or newlines.
+   - Use `\n` to represent a newline within a string.
+   - The entire JSON object for a single vulnerability should ideally be on a condensed set of lines, or ensure no property value is broken across lines.
+
+3. **NO TRAILING COMMAS**:
+   - Ensure there is NO comma after the last property in an object.
+   - Ensure there is NO comma after the last object in the `vulnerabilities` array.
+
+4. **CONTROL CHARACTERS**:
+   - Do NOT include raw control characters (tabs, null bytes, etc.). Use `\t`, `\b`, `\f`, `\r`.
+
+5. **BLOCK INTEGRITY**:
+   - Always ensure every open brace `{` or bracket `[` has a matching closing `}` or `]`.
+   - Never truncate the JSON block.
+
+6. **PURE JSON ONLY**:
+   - The value passed to the `content` field of the `save_deliverable` tool must be a valid, stringified JSON object.
+   - Do NOT wrap the JSON in Markdown code blocks (```json ... ```) *inside* the tool call parameter itself unless the system explicitly expects it (usually it expects the raw stringified JSON).

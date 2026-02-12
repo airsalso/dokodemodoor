@@ -96,8 +96,17 @@ export async function saveDeliverable(args) {
       if (existsSync(existingPath)) {
         try {
           const existingRaw = readFileSync(existingPath, 'utf8');
-          const existingJson = JSON.parse(existingRaw);
-          const incomingJson = JSON.parse(content);
+          // Use robust validation/parsing for both existing and incoming content
+          const existingValidation = validateQueueJson(existingRaw);
+          const incomingValidation = validateQueueJson(content);
+
+          if (!incomingValidation.valid && !existingValidation.valid) {
+            throw new Error(`Both existing and incoming JSON are invalid: ${incomingValidation.message}`);
+          }
+
+          const existingJson = existingValidation.data || {};
+          const incomingJson = incomingValidation.data || {};
+
           const existingList = Array.isArray(existingJson?.vulnerabilities) ? existingJson.vulnerabilities : [];
           const incomingList = Array.isArray(incomingJson?.vulnerabilities) ? incomingJson.vulnerabilities : [];
 
@@ -141,9 +150,13 @@ export async function saveDeliverable(args) {
         }
       } else {
         try {
-          const incomingJson = JSON.parse(content);
+          const incomingValidation = validateQueueJson(content);
+          const incomingJson = incomingValidation.data || {};
           const incomingList = Array.isArray(incomingJson?.vulnerabilities) ? incomingJson.vulnerabilities : [];
           logQueueMerge(`[QUEUE MERGE] ${filename}: no existing queue; incoming ${incomingList.length}`);
+          if (incomingValidation.valid) {
+            finalContent = JSON.stringify(incomingJson, null, 2);
+          }
         } catch (parseError) {
           logQueueMerge(`[QUEUE MERGE] ${filename}: no existing queue; incoming (unparsed)`);
         }
@@ -219,7 +232,9 @@ export async function saveDeliverable(args) {
       finalContent = autoCloseJson(stripBodyFields(finalContent));
 
       const normalizeEvidenceJson = (raw) => {
-        const parsed = JSON.parse(raw);
+        const validation = validateEvidenceJson(raw);
+        if (!validation.valid) return raw;
+        const parsed = validation.data;
         if (!parsed?.vulnerabilities || !Array.isArray(parsed.vulnerabilities)) return raw;
 
         for (const vuln of parsed.vulnerabilities) {
@@ -251,8 +266,7 @@ export async function saveDeliverable(args) {
       try {
         finalContent = normalizeEvidenceJson(finalContent);
       } catch (e) {
-        // If normalization fails, keep original content so validator can report the error
-        finalContent = content;
+        // If normalization fails, keep current content so regular validator can report specific errors
       }
 
       const evidenceValidation = validateEvidenceJson(finalContent);
