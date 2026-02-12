@@ -94,7 +94,11 @@ Repository Path: {{REPO_PATH}}
 - **Beyond Syntax:** Tools find patterns; you find **Logic**. Focus on how different endpoints interact, how state is managed across requests, and how business rules can be twisted.
 - **Verify but Explore:** Briefly verify tool candidates, but spend 80% of your energy on the **logical gaps** that these tools cannot see (e.g., IDOR in complex workflows, auth bypass via multi-step logic).
 
+### 4.6 Cumulative Analysis Context (PROGRESSIVE COVERAGE)
+{{CUMULATIVE_CONTEXT}}
+
 ---
+
 
 ## 5) STATE MANAGEMENT & PERSISTENCE (CORE MEMORY)
 

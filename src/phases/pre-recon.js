@@ -8,6 +8,8 @@ import { AGENTS } from '../session-manager.js';
 import { runAgentPromptWithRetry } from '../ai/agent-executor.js';
 import { loadPrompt } from '../prompts/prompt-manager.js';
 import { getLocalISOString } from '../utils/time-utils.js';
+import { loadPreviousVulnerabilities, identifyUnexploredDirectories } from '../utils/cumulative-analysis.js';
+
 
 const buildSkippedResult = (tool, reason) => ({
   tool,
@@ -295,9 +297,23 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
     }
 
     // Code Analysis
+    // Load previous vulnerability context for cumulative analysis
+    console.log(chalk.blue('    📊 Loading previous scan context for cumulative analysis...'));
+    const previousContext = await loadPreviousVulnerabilities(sourceDir);
+    const unexploredDirs = await identifyUnexploredDirectories(previousContext.analyzedFiles, sourceDir);
+
+    let focusRecommendation = '';
+    if (unexploredDirs.length > 0) {
+      focusRecommendation = `\n**Recommended Focus Areas** (Unexplored Directories):\n`;
+      unexploredDirs.slice(0, 5).forEach(dir => {
+        focusRecommendation += `- \`${dir}/\` - Not yet analyzed\n`;
+      });
+    }
+
     const agentVariables = {
       ...variables,
-      SCHEMATHESIS_BANNER: skipSchemathesis ? '(DEPRECATED/SKIP)' : '(ENCOURAGED: High priority for API fuzzing)'
+      SCHEMATHESIS_BANNER: skipSchemathesis ? '(DEPRECATED/SKIP)' : '(ENCOURAGED: High priority for API fuzzing)',
+      CUMULATIVE_CONTEXT: previousContext.summary + focusRecommendation
     };
 
     codeAnalysis = await runAgentPromptWithRetry(
@@ -363,9 +379,23 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
   }
 
   // Code Analysis
+  // Load previous vulnerability context for cumulative analysis
+  console.log(chalk.blue('    📊 Loading previous scan context for cumulative analysis...'));
+  const previousContext = await loadPreviousVulnerabilities(sourceDir);
+  const unexploredDirs = await identifyUnexploredDirectories(previousContext.analyzedFiles, sourceDir);
+
+  let focusRecommendation = '';
+  if (unexploredDirs.length > 0) {
+    focusRecommendation = `\n**Recommended Focus Areas** (Unexplored Directories):\n`;
+    unexploredDirs.slice(0, 5).forEach(dir => {
+      focusRecommendation += `- \`${dir}/\` - Not yet analyzed\n`;
+    });
+  }
+
   const agentVariables = {
     ...variables,
-    SCHEMATHESIS_BANNER: skipSchemathesis ? '(DEPRECATED/SKIP)' : '(ENCOURAGED: High priority for API fuzzing)'
+    SCHEMATHESIS_BANNER: skipSchemathesis ? '(DEPRECATED/SKIP)' : '(ENCOURAGED: High priority for API fuzzing)',
+    CUMULATIVE_CONTEXT: previousContext.summary + focusRecommendation
   };
 
   operations.push(
