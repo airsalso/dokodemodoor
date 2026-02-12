@@ -81,27 +81,242 @@ FORMAT:
 
 ---
 
+## 7) REPORT TEMPLATE (MANDATORY STRUCTURE)
+
+Your report MUST follow this exact structure. Each vulnerability requires DEEP ANALYSIS, not just surface-level listing.
+
 # Open Source Vulnerability Analysis Report
 
 ## 1. Executive Summary
-- Total dependencies analyzed
-- Critical/High vulnerabilities found
-- High-level risk score for the application
+- **Total dependencies analyzed**: [number]
+- **Critical/High vulnerabilities found**: [number]
+- **Exploitable vulnerabilities** (with confirmed code paths): [number]
+- **Overall risk score**: [Critical/High/Medium/Low]
+- **Key findings**: 2-3 sentence summary of the most critical issues
+
+---
 
 ## 2. Vulnerability Deep Dive
-For each significant vulnerability:
-### [Package Name] ([CVE-ID])
+
+For EACH vulnerability, you MUST provide ALL of the following sections:
+
+### [Package Name] v[version] - [CVE-ID or GHSA-ID]
+
+#### 2.1 Vulnerability Overview
 - **Severity**: [Critical/High/Medium/Low]
-- **Description**: Technical explanation.
-- **Reachability Analysis**: Evidence of usage in target codebase (e.g., "Used in `src/auth.js` line 45").
+- **CVSS Score**: [if available]
+- **Vulnerability Type**: [e.g., Command Injection, Prototype Pollution, XSS, DoS]
+- **Technical Description**: Explain the vulnerability in 2-3 sentences. What is the root cause?
+
+#### 2.2 Reachability Analysis (MANDATORY - MOST IMPORTANT)
+**This is the core value of the report. You MUST investigate:**
+
+1. **Import/Usage Detection**:
+   - Use `grep -rn "require('package-name')" {{REPO_PATH}}` or `grep -rn "from 'package-name'" {{REPO_PATH}}`
+   - List ALL files that import this package with exact file paths and line numbers
+   - Example: `src/lib/auth.ts:12`, `routes/api.ts:5`
+
+2. **Vulnerable Function Call Path**:
+   - Identify the SPECIFIC vulnerable function/method (e.g., `jwt.verify()`, `yaml.load()`, `multer.single()`)
+   - Use `grep -rn "vulnerableFunction" {{REPO_PATH}}` to find where it's called
+   - Trace the call path from user input to the vulnerable function
+   - Example: `POST /api/upload → routes/upload.ts:45 → multer.single('file') → VULNERABLE`
+
+3. **Attack Surface Mapping**:
+   - Is this function reachable from an **external HTTP endpoint**? (Yes/No + endpoint path)
+   - Is it reachable from **WebSocket/Socket.IO**? (Yes/No + event name)
+   - Is it only used in **internal scripts/migrations**? (Low risk if true)
+   - What **user-controlled inputs** reach this function? (query params, body fields, headers, file uploads)
+
+4. **Exploitability Assessment**:
+   - **Confirmed Exploitable**: Clear path from user input to vulnerable code
+   - **Potentially Exploitable**: Function is used but input validation unclear
+   - **Low Risk**: Package imported but vulnerable function not called
+   - **Not Reachable**: Package in dependencies but not actually imported
+
+**Example Output**:
+```
+✅ CONFIRMED EXPLOITABLE
+- Import: `lib/insecurity.ts:8` → `const jwt = require('jsonwebtoken')`
+- Vulnerable Call: `lib/insecurity.ts:42` → `jwt.verify(token, secret)`
+- Attack Surface: `POST /rest/user/login` → `routes/login.ts:23` → calls `insecurity.verify()`
+- User Input: `Authorization` header → directly passed to `jwt.verify()` without algorithm validation
+- Exploit Path: Attacker sends JWT with `alg: "none"` → bypasses signature check → authentication bypass
+```
+
+#### 2.3 Proof of Concept (Reproduce Steps)
+Provide SPECIFIC steps to trigger the vulnerability in THIS codebase:
+1. **Setup**: Any required configuration or state
+2. **Attack Vector**: Exact HTTP request, payload, or input
+3. **Expected Result**: What happens when exploited (crash, bypass, data leak, etc.)
+
+**Example**:
+```bash
+# Step 1: Start the application
+npm start
+
+# Step 2: Send malicious JWT
+curl -X POST http://localhost:3000/rest/user/login \
+  -H "Authorization: Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJ1c2VyIjoiYWRtaW4ifQ." \
+  -H "Content-Type: application/json"
+
+# Step 3: Observe authentication bypass (200 OK instead of 401)
+```
+
+#### 2.4 Impact Analysis
+- **Confidentiality**: [None/Low/Medium/High] - What data can be exposed?
+- **Integrity**: [None/Low/Medium/High] - Can attacker modify data?
+- **Availability**: [None/Low/Medium/High] - Can attacker crash the service?
+- **Business Impact**: What is the real-world consequence for this specific application?
+
+---
 
 ## 3. Remediation & Hedging Guide
 
-| Package | Current Version | Vulnerable Version(s) | Recommended Update | Hedge / Workaround |
-|:---|:---|:---|:---|:---|
-| [Name] | [vX.Y.Z] | [<vA.B.C] | `npm install package@vA.B.C` | Brief technical workaround |
+### 3.1 Immediate Actions (Priority Order)
 
-- **Security Strategy**: Summary of overall hedging approach.
+| Priority | Package | Current | Vulnerable | Fix Version | Action | Effort |
+|:--------:|:--------|:--------|:-----------|:------------|:-------|:-------|
+| 🔴 P0 | jsonwebtoken | 0.4.0 | < 9.0.0 | 9.0.2 | `npm install jsonwebtoken@9.0.2` | Low |
+| 🔴 P0 | express-jwt | 0.1.3 | < 6.0.0 | 6.1.1 | `npm install express-jwt@6.1.1` + code changes | Medium |
+| 🟡 P1 | sanitize-html | 1.4.2 | < 2.11.0 | 2.11.0 | `npm install sanitize-html@2.11.0` | Low |
+
+**Priority Levels**:
+- **P0 (Critical)**: Confirmed exploitable, external attack surface, high impact
+- **P1 (High)**: Potentially exploitable or high severity but limited attack surface
+- **P2 (Medium)**: Low exploitability or impact
+- **P3 (Low)**: Not reachable or informational
+
+### 3.2 Detailed Hedging Strategies (When Upgrade is Not Immediate)
+
+For EACH high-priority vulnerability, provide a SPECIFIC hedging strategy:
+
+#### [Package Name] - Temporary Mitigation
+
+**Option 1: Input Validation** (Recommended if upgrade blocked)
+```javascript
+// File: lib/insecurity.ts
+// Add BEFORE calling jwt.verify()
+
+const ALLOWED_ALGORITHMS = ['HS256', 'RS256'];
+
+function safeVerify(token, secret) {
+  const decoded = jwt.decode(token, { complete: true });
+
+  // Hedge: Reject tokens with unsafe algorithms
+  if (!decoded || !ALLOWED_ALGORITHMS.includes(decoded.header.alg)) {
+    throw new Error('Invalid algorithm');
+  }
+
+  return jwt.verify(token, secret, { algorithms: ALLOWED_ALGORITHMS });
+}
+```
+
+**Option 2: Wrapper Function** (If you can't modify library usage)
+```javascript
+// File: lib/safeWrappers.ts
+// Create a safe wrapper and replace all imports
+
+const originalJwt = require('jsonwebtoken');
+
+module.exports = {
+  ...originalJwt,
+  verify: (token, secret, options = {}) => {
+    return originalJwt.verify(token, secret, {
+      ...options,
+      algorithms: options.algorithms || ['HS256', 'RS256']
+    });
+  }
+};
+
+// Then in all files: replace `require('jsonwebtoken')` with `require('./lib/safeWrappers')`
+```
+
+**Option 3: Dependency Pinning + Monitoring** (Last resort)
+```json
+// package.json
+{
+  "overrides": {
+    "jsonwebtoken": "9.0.2"  // Force all transitive deps to use safe version
+  }
+}
+```
+
+**Effort Estimate**: [Low/Medium/High]
+**Risk Reduction**: [Partial/Significant/Complete]
+
+### 3.3 Breaking Changes & Migration Notes
+
+For packages requiring major version upgrades, document breaking changes:
+
+#### express-jwt: 0.1.3 → 6.1.1
+**Breaking Changes**:
+1. API changed from `expressJwt(secret)` to `expressjwt({ secret, algorithms })`
+2. `req.user` is now `req.auth` by default
+3. Error handling changed - must use custom error handler
+
+**Migration Steps**:
+```javascript
+// OLD (v0.1.3)
+app.use(expressJwt('secret'));
+
+// NEW (v6.1.1)
+app.use(expressjwt({
+  secret: 'secret',
+  algorithms: ['HS256'],
+  requestProperty: 'user'  // Keep old behavior
+}));
+
+// Add error handler
+app.use((err, req, res, next) => {
+  if (err.name === 'UnauthorizedError') {
+    res.status(401).send('Invalid token');
+  }
+});
+```
+
+**Testing Checklist**:
+- [ ] All protected routes still require authentication
+- [ ] Token validation works with existing tokens
+- [ ] Error responses match expected format
+- [ ] Integration tests pass
+
+---
+
+## 4. Long-Term Security Recommendations
+
+1. **Dependency Scanning Automation**:
+   - Integrate `npm audit` or Snyk into CI/CD pipeline
+   - Set up automated PR creation for security updates (Dependabot, Renovate)
+
+2. **Version Pinning Strategy**:
+   - Use exact versions (`1.2.3`) instead of ranges (`^1.2.3`) for security-critical packages
+   - Document why specific versions are pinned
+
+3. **Alternative Libraries** (if current package is unmaintained):
+   - [Package Name] → Consider migrating to [Alternative] (actively maintained, better security track record)
+
+4. **Security Monitoring**:
+   - Subscribe to security advisories for critical packages
+   - Set up alerts for new CVEs affecting your dependencies
+
+---
+
+## 5. Analysis Constraints & Blind Spots
+
+**What was analyzed**:
+- [List of manifest files scanned]
+- [Number of files searched for import statements]
+
+**Limitations**:
+- Dynamic `require()` calls may not be detected by static grep
+- Transitive dependencies (dependencies of dependencies) were analyzed but call paths not fully traced
+- Runtime configuration that might disable vulnerable features was not evaluated
+
+**Recommended Follow-up**:
+- Manual code review of [specific files] to confirm exploit paths
+- Dynamic testing with actual exploit payloads in staging environment
+- Review of [specific package] usage in [specific module] for hidden calls
 
 ---
 
