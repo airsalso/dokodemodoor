@@ -31,8 +31,28 @@ export async function loadPreviousVulnerabilities(sourceDir) {
   };
 
   try {
-    // Check if deliverables directory exists
-    if (!await fs.pathExists(deliverablesDir)) {
+    // Collect all potential deliverables directories
+    const deliverablesDirs = [];
+
+    // 1. Current deliverables directory
+    if (await fs.pathExists(deliverablesDir)) {
+      deliverablesDirs.push({ path: deliverablesDir, label: 'current' });
+    }
+
+    // 2. Archived deliverables directories (deliverables__*)
+    const parentDir = path.dirname(deliverablesDir);
+    const allEntries = await fs.readdir(parentDir);
+    const archivedDirs = allEntries.filter(entry => entry.startsWith('deliverables__'));
+
+    for (const archivedDir of archivedDirs) {
+      const fullPath = path.join(parentDir, archivedDir);
+      const stat = await fs.stat(fullPath);
+      if (stat.isDirectory()) {
+        deliverablesDirs.push({ path: fullPath, label: archivedDir });
+      }
+    }
+
+    if (deliverablesDirs.length === 0) {
       console.log(chalk.gray('    ℹ️  No previous scan data found (first run)'));
       return {
         summary: '**FIRST SCAN**: No previous vulnerabilities found. Perform comprehensive analysis of all code areas.',
@@ -43,11 +63,27 @@ export async function loadPreviousVulnerabilities(sourceDir) {
       };
     }
 
-    // Read all files in deliverables directory
-    const files = await fs.readdir(deliverablesDir);
-    const queueFiles = files.filter(f => queuePattern.test(f));
+    console.log(chalk.blue(`    📂 Searching ${deliverablesDirs.length} deliverables location(s) for previous results...`));
 
-    if (queueFiles.length === 0) {
+    // Read all queue files from all deliverables directories
+    const allQueueFiles = [];
+    for (const dir of deliverablesDirs) {
+      try {
+        const files = await fs.readdir(dir.path);
+        const queueFiles = files.filter(f => queuePattern.test(f));
+        queueFiles.forEach(file => {
+          allQueueFiles.push({
+            path: path.join(dir.path, file),
+            name: file,
+            source: dir.label
+          });
+        });
+      } catch (err) {
+        console.log(chalk.yellow(`    ⚠️  Could not read ${dir.label}: ${err.message}`));
+      }
+    }
+
+    if (allQueueFiles.length === 0) {
       console.log(chalk.gray('    ℹ️  No previous exploitation queues found (first run)'));
       return {
         summary: '**FIRST SCAN**: No previous vulnerabilities found. Perform comprehensive analysis of all code areas.',
@@ -58,15 +94,14 @@ export async function loadPreviousVulnerabilities(sourceDir) {
       };
     }
 
-    console.log(chalk.blue(`    📂 Found ${queueFiles.length} previous exploitation queue(s)`));
+    console.log(chalk.blue(`    📂 Found ${allQueueFiles.length} previous exploitation queue(s) across all scans`));
 
     // Load and parse each queue file
-    for (const queueFile of queueFiles) {
-      const queuePath = path.join(deliverablesDir, queueFile);
-      const vulnType = queueFile.replace('_exploitation_queue.json', '').toUpperCase();
+    for (const queueFile of allQueueFiles) {
+      const vulnType = queueFile.name.replace('_exploitation_queue.json', '').toUpperCase();
 
       try {
-        const content = await fs.readFile(queuePath, 'utf8');
+        const content = await fs.readFile(queueFile.path, 'utf8');
         const queue = JSON.parse(content);
 
         if (!queue.vulnerabilities || !Array.isArray(queue.vulnerabilities)) {
@@ -76,7 +111,7 @@ export async function loadPreviousVulnerabilities(sourceDir) {
         const vulnCount = queue.vulnerabilities.length;
         result.totalCount += vulnCount;
         result.vulnerabilityTypes.add(vulnType);
-        result.byType[vulnType] = vulnCount;
+        result.byType[vulnType] = (result.byType[vulnType] || 0) + vulnCount;
 
         // Extract analyzed file paths
         queue.vulnerabilities.forEach(vuln => {
@@ -85,9 +120,9 @@ export async function loadPreviousVulnerabilities(sourceDir) {
           }
         });
 
-        console.log(chalk.gray(`       → ${vulnType}: ${vulnCount} vulnerabilities`));
+        console.log(chalk.gray(`       → ${vulnType} (${queueFile.source}): ${vulnCount} vulnerabilities`));
       } catch (err) {
-        console.log(chalk.yellow(`    ⚠️  Failed to parse ${queueFile}: ${err.message}`));
+        console.log(chalk.yellow(`    ⚠️  Failed to parse ${queueFile.name}: ${err.message}`));
       }
     }
 
@@ -97,7 +132,7 @@ export async function loadPreviousVulnerabilities(sourceDir) {
 
     let summary = `## 🔄 CUMULATIVE ANALYSIS MODE (Previous Scan Context)\n\n`;
     summary += `### Previously Discovered Vulnerabilities\n\n`;
-    summary += `**Total**: ${result.totalCount} vulnerabilities found across ${queueFiles.length} categories\n\n`;
+    summary += `**Total**: ${result.totalCount} vulnerabilities found across ${Object.keys(result.byType).length} categories\n\n`;
 
     summary += `**By Type**:\n`;
     vulnTypesArray.forEach(type => {
