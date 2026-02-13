@@ -249,6 +249,9 @@ export async function registerRemoteMCPTools(mcpServers) {
 
   console.log(chalk.blue(`    🔧 Registering remote MCP tools from ${Object.keys(mcpServers).length} server(s)...`));
 
+  // Import HTTP proxy for http/sse servers
+  const { mcpHttpManager } = await import('./mcp-http-proxy.js');
+
   for (const [serverName, config] of Object.entries(mcpServers)) {
     // Skip local dokodemodoor-helper as it's already registered via registerMCPTools()
     if (serverName === 'dokodemodoor-helper') {
@@ -256,11 +259,32 @@ export async function registerRemoteMCPTools(mcpServers) {
       continue;
     }
 
-    console.log(chalk.blue(`    🚀 Starting MCP server: ${serverName}`));
-    console.log(chalk.gray(`       Command: ${config.command} ${config.args?.join(' ') || ''}`));
+    // Determine server type
+    const serverType = config.type || 'stdio';
+    const isHttpBased = serverType === 'http' || serverType === 'sse';
+
+    console.log(chalk.blue(`    🚀 Starting MCP server: ${serverName} (${serverType})`));
+
+    if (isHttpBased) {
+      if (!config.url) {
+        console.error(chalk.red(`    ❌ HTTP/SSE MCP server ${serverName} missing 'url' field`));
+        continue;
+      }
+      console.log(chalk.gray(`       URL: ${config.url}`));
+    } else {
+      if (!config.command) {
+        console.error(chalk.red(`    ❌ stdio MCP server ${serverName} missing 'command' field`));
+        continue;
+      }
+      console.log(chalk.gray(`       Command: ${config.command} ${config.args?.join(' ') || ''}`));
+    }
 
     try {
-      const proxy = mcpManager.getProxy(serverName, config.command, config.args, config.env, config.cwd);
+      // Get appropriate proxy based on server type
+      const proxy = isHttpBased
+        ? mcpHttpManager.getProxy(serverName, config.url)
+        : mcpManager.getProxy(serverName, config.command, config.args, config.env, config.cwd);
+
       console.log(chalk.gray(`       Listing tools from ${serverName}...`));
       const remoteTools = await proxy.listTools();
       console.log(chalk.green(`       ✅ Found ${remoteTools.length} tools from ${serverName}`));
@@ -309,7 +333,11 @@ export async function registerRemoteMCPTools(mcpServers) {
     } catch (e) {
       console.error(chalk.red(`    ❌ Failed to register remote MCP tools for ${serverName}`));
       console.error(chalk.red(`       Error: ${e.message}`));
-      console.error(chalk.gray(`       Command: ${config.command} ${config.args?.join(' ') || ''}`));
+      if (isHttpBased) {
+        console.error(chalk.gray(`       URL: ${config.url}`));
+      } else {
+        console.error(chalk.gray(`       Command: ${config.command} ${config.args?.join(' ') || ''}`));
+      }
       if (process.env.DEBUG || process.env.DOKODEMODOOR_DEBUG === 'true') {
         console.error(chalk.gray(`       Stack: ${e.stack}`));
       }
@@ -319,3 +347,4 @@ export async function registerRemoteMCPTools(mcpServers) {
 
   console.log(chalk.blue(`    📦 Total tools registered: ${toolRegistry.tools.size}`));
 }
+

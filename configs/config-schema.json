@@ -114,7 +114,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["stdio", "sse"],
+            "enum": ["stdio", "sse", "http"],
             "description": "MCP server connection type"
           },
           "command": {
@@ -145,6 +145,48 @@
       "type": "object",
       "description": "Deprecated: Use 'authentication' section instead",
       "deprecated": true
+    },
+    "reverse_engineering": {
+      "type": "object",
+      "description": "Configuration for reverse engineering analysis of binaries",
+      "properties": {
+        "binary_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to the target binary (PE/ELF/Mach-O)"
+        },
+        "symbols_path": {
+          "type": "string",
+          "description": "Optional path to debug symbols (PDB for Windows, DWARF/debuginfo for Linux)"
+        },
+        "process_name": {
+          "type": "string",
+          "description": "Process name for dynamic analysis (if binary needs to be running)"
+        },
+        "launch_args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments to pass when launching the binary for dynamic analysis"
+        },
+        "analysis_focus": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["network", "authentication", "cryptography", "license", "update", "anti-tamper", "file-io", "registry", "sysconfig"]
+          },
+          "description": "Which categories of behavior to focus on"
+        },
+        "network_interface": {
+          "type": "string",
+          "description": "Network interface for tshark capture (default: auto-detect)"
+        },
+        "ghidra_project": {
+          "type": "string",
+          "description": "Path to existing Ghidra project (skip import if provided)"
+        }
+      },
+      "required": ["binary_path"],
+      "additionalProperties": false
     }
   },
   "additionalProperties": false,

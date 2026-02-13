@@ -729,6 +729,30 @@ export class VLLMProvider extends LLMProvider {
       trimmed = this.enforceToolCallPairing(trimmed);
     }
 
+    // [SAFETY NET] Final guarantee: if still over limit, aggressively truncate
+    // This handles cases where enforceToolCallPairing adds back messages
+    if (totalSize(trimmed) > maxChars) {
+      console.log(chalk.red(`    🚨 Trimmed size ${totalSize(trimmed)} still exceeds ${maxChars}. Applying emergency truncation...`));
+
+      // Keep system message + last 2 messages only, with very aggressive truncation
+      let emergencyLimit = Math.floor(maxChars / 3);
+      trimmed = [initial, ...messages.slice(-2).map(m => this.truncateMessageContent(m, emergencyLimit))];
+      trimmed = this.enforceToolCallPairing(trimmed);
+
+      // If STILL over (edge case), truncate each message proportionally
+      while (totalSize(trimmed) > maxChars && emergencyLimit > 100) {
+        emergencyLimit = Math.floor(emergencyLimit * 0.5);
+        trimmed = trimmed.map(m => this.truncateMessageContent(m, emergencyLimit));
+        trimmed = this.enforceToolCallPairing(trimmed);
+      }
+
+      // Absolute last resort: keep only system message with truncated content
+      if (totalSize(trimmed) > maxChars) {
+        console.log(chalk.red(`    💀 CRITICAL: Using absolute minimum context (system message only)`));
+        trimmed = [this.truncateMessageContent(initial, Math.floor(maxChars * 0.9))];
+      }
+    }
+
     return trimmed;
   }
 
@@ -992,6 +1016,20 @@ export class VLLMProvider extends LLMProvider {
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const readyMessages = await buildReadyMessages(extraSystemMsg);
+
+          // [CRITICAL VALIDATION] Verify final size before API call
+          const finalSize = this.getMessagesSize(readyMessages);
+          if (finalSize > this.maxPromptChars) {
+            console.log(chalk.red(`    ❌ CRITICAL: Final prompt size ${finalSize} exceeds limit ${this.maxPromptChars}!`));
+            console.log(chalk.red(`    Messages: ${readyMessages.length}, Agent: ${agentName}`));
+            throw new Error(`Prompt size ${finalSize} exceeds configured limit ${this.maxPromptChars} after trimming. This should never happen.`);
+          }
+
+          // Log final size for debugging
+          if (shouldLogPromptSize || finalSize > this.maxPromptChars * 0.8) {
+            console.log(chalk.cyan(`    📤 Sending to vLLM: ${finalSize} chars (${Math.round(finalSize/this.maxPromptChars*100)}% of limit), ${readyMessages.length} messages`));
+          }
+
             response = await this.client.chat.completions.create({
               model: this.model,
               messages: readyMessages,
@@ -1019,6 +1057,34 @@ export class VLLMProvider extends LLMProvider {
           break;
         } catch (error) {
           const msg = (error && error.message) ? error.message : '';
+
+          // [ENHANCED 400 ERROR DIAGNOSTICS]
+          if (error.status === 400 || msg.includes('400') || msg.includes('Bad Request')) {
+            const readyMessages = await buildReadyMessages(extraSystemMsg);
+            const finalSize = this.getMessagesSize(readyMessages);
+            console.log(chalk.red(`\n    ❌ 400 Bad Request Error - Detailed Diagnostics:`));
+            console.log(chalk.red(`       Agent: ${agentName}`));
+            console.log(chalk.red(`       Prompt Size: ${finalSize} chars (limit: ${this.maxPromptChars})`));
+            console.log(chalk.red(`       Message Count: ${readyMessages.length}`));
+            console.log(chalk.red(`       Turn: ${turnCount}/${maxTurns}`));
+            console.log(chalk.red(`       Model: ${this.model}`));
+            console.log(chalk.red(`       Error: ${msg}\n`));
+
+            // Log to audit session for analysis
+            const auditSession = getAuditSession();
+            if (auditSession) {
+              await auditSession.logEvent('vllm_400_error', {
+                agent: agentName,
+                prompt_size_chars: finalSize,
+                message_count: readyMessages.length,
+                turn: turnCount,
+                max_turns: maxTurns,
+                model: this.model,
+                error_message: msg,
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
 
           // Noise reduction: Filter out periodic SSE timeouts or generic fetch errors
           // unless DOKODEMODOOR_DEBUG is enabled.
