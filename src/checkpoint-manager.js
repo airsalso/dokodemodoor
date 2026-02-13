@@ -886,21 +886,19 @@ const runParallelVuln = async (session, runAgentPromptWithRetry, loadPrompt) => 
   const startTime = Date.now();
   const { config } = await import('./config/env.js');
   const parallelLimit = config.dokodemodoor.parallelLimit || 5;
-  const results = [];
 
-  // Run in chunks to respect parallelLimit
-  for (let i = 0; i < activeAgents.length; i += parallelLimit) {
-    const chunk = activeAgents.slice(i, i + parallelLimit);
-    console.log(chalk.gray(`    ⚡ Running chunk ${Math.floor(i / parallelLimit) + 1} (${chunk.join(', ')})`));
+  // Use semaphore-based pool: as soon as one agent finishes, the next starts.
+  // Unlike chunk-based execution, a slow agent does not block other slots.
+  const { Semaphore } = await import('./utils/concurrency.js');
+  const sem = new Semaphore(parallelLimit);
+  console.log(chalk.gray(`    ⚡ Concurrency: max ${parallelLimit} agents in parallel (semaphore pool)`));
 
-    const chunkResults = await Promise.allSettled(
-      chunk.map(async (agentName) => {
-        const result = await runSingleAgent(agentName, currentSession, runAgentPromptWithRetry, loadPrompt, false, true);
-        return { agentName, ...result, attempts: 1 };
-      })
-    );
-    results.push(...chunkResults);
-  }
+  const results = await sem.map(activeAgents, async (agentName) => {
+    console.log(chalk.gray(`    ▶ Starting: ${agentName}`));
+    const result = await runSingleAgent(agentName, currentSession, runAgentPromptWithRetry, loadPrompt, false, true);
+    console.log(chalk.gray(`    ◀ Finished: ${agentName}`));
+    return { agentName, ...result, attempts: 1 };
+  });
 
   const totalDuration = Date.now() - startTime;
 
@@ -915,8 +913,9 @@ const runParallelVuln = async (session, runAgentPromptWithRetry, loadPrompt) => 
   const completed = [];
   const failed = [];
 
-  results.forEach((result, index) => {
-    const agentName = activeAgents[index];
+  results.forEach((result) => {
+    // Use agentName from the result itself — safe regardless of execution order
+    const agentName = result.status === 'fulfilled' ? result.value.agentName : (result.reason?.agentName || 'unknown');
     const agentDisplay = agentName.padEnd(22);
 
     if (result.status === 'fulfilled' && result.value.success) {
@@ -1062,35 +1061,33 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
   const startTime = Date.now();
   const { config } = await import('./config/env.js');
   const parallelLimit = config.dokodemodoor.parallelLimit || 5;
-  const results = [];
 
-  // Run in chunks to respect parallelLimit
-  for (let i = 0; i < activeAgents.length; i += parallelLimit) {
-    const chunk = activeAgents.slice(i, i + parallelLimit);
-    console.log(chalk.gray(`    ⚡ Running chunk ${Math.floor(i / parallelLimit) + 1} (${chunk.join(', ')})`));
+  // Use semaphore-based pool: as soon as one agent finishes, the next starts.
+  // Unlike chunk-based execution, a slow agent does not block other slots.
+  const { Semaphore } = await import('./utils/concurrency.js');
+  const sem = new Semaphore(parallelLimit);
+  console.log(chalk.gray(`    ⚡ Concurrency: max ${parallelLimit} agents in parallel (semaphore pool)`));
 
-    const chunkResults = await Promise.allSettled(
-      chunk.map(async (agentName) => {
-        // Load queue data for this exploitation agent
-        let queueData = null;
-        try {
-          const vulnType = agentName.replace('-exploit', '');
-          const queuePath = path.join(freshSession.targetRepo, 'deliverables', `${vulnType}_exploitation_queue.json`);
+  const results = await sem.map(activeAgents, async (agentName) => {
+    // Load queue data for this exploitation agent
+    let queueData = null;
+    try {
+      const vulnType = agentName.replace('-exploit', '');
+      const queuePath = path.join(freshSession.targetRepo, 'deliverables', `${vulnType}_exploitation_queue.json`);
 
-          if (await fs.pathExists(queuePath)) {
-            const queueContent = await fs.readFile(queuePath, 'utf8');
-            queueData = JSON.parse(queueContent);
-          }
-        } catch (error) {
-          console.log(chalk.yellow(`    ⚠️  Failed to load queue for ${agentName}: ${error.message}`));
-        }
+      if (await fs.pathExists(queuePath)) {
+        const queueContent = await fs.readFile(queuePath, 'utf8');
+        queueData = JSON.parse(queueContent);
+      }
+    } catch (error) {
+      console.log(chalk.yellow(`    ⚠️  Failed to load queue for ${agentName}: ${error.message}`));
+    }
 
-        const result = await runSingleAgent(agentName, freshSession, runAgentPromptWithRetry, loadPrompt, false, true, queueData);
-        return { agentName, ...result, attempts: result.attempts || 1 };
-      })
-    );
-    results.push(...chunkResults);
-  }
+    console.log(chalk.gray(`    ▶ Starting: ${agentName}`));
+    const result = await runSingleAgent(agentName, freshSession, runAgentPromptWithRetry, loadPrompt, false, true, queueData);
+    console.log(chalk.gray(`    ◀ Finished: ${agentName}`));
+    return { agentName, ...result, attempts: result.attempts || 1 };
+  });
 
   const totalDuration = Date.now() - startTime;
 
@@ -1173,10 +1170,14 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
         }
 
         const exploitedCount = vulnerabilities.filter(vuln => vuln.verdict === 'EXPLOITED').length;
+        const blockedCount = vulnerabilities.filter(vuln => vuln.verdict === 'BLOCKED_BY_SECURITY').length;
         const potentialCount = vulnerabilities.filter(vuln => vuln.verdict === 'POTENTIAL').length;
 
         if (exploitedCount > 0) {
           return { success: true, result: `${exploitedCount} Exploited`, reason: 'Successfully exploited vulnerabilities' };
+        }
+        if (blockedCount > 0) {
+          return { success: true, result: `${blockedCount} Blocked`, reason: 'Vulnerabilities were attempted but blocked by security controls' };
         }
         if (potentialCount > 0) {
           return { success: true, result: 'Potential', reason: 'Potential vulnerabilities identified' };
@@ -1204,7 +1205,8 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
 
   for (let index = 0; index < results.length; index++) {
     const result = results[index];
-    const agentName = activeAgents[index];
+    // Use agentName from the result itself — safe regardless of execution order
+    const agentName = result.status === 'fulfilled' ? result.value.agentName : (result.reason?.agentName || activeAgents[index] || 'unknown');
     const agentDisplay = agentName.padEnd(22);
 
     if (result.status === 'fulfilled' && result.value.success) {
@@ -1220,6 +1222,8 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
       // Color based on validation result
       const resultColor = validation.success && exploitResult.includes('Exploited')
         ? chalk.green
+        : validation.success && exploitResult.includes('Blocked')
+        ? chalk.blue
         : validation.success && exploitResult === 'Potential'
         ? chalk.yellow
         : validation.success && exploitResult === 'No Vulns'

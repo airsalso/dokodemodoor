@@ -168,7 +168,7 @@ Keep the list compact (top 10–30 hits per class). Use these as **inputs**, not
 
 4) **API Schema Harvester**
 - Locate any OpenAPI/Swagger/GraphQL schema files (e.g., `swagger.json`, `openapi.yaml`, `schema.graphql`).
-- If found, you MUST use `write_to_file` to save a copy of these files to the `outputs/schemas/` directory within the repository.
+- If found, you MUST use `write_file` to save a copy of these files to the `outputs/schemas/` directory within the repository.
 - This enables automated fuzzing in the next wave.
 - If no files exist but you find code that *generates* or *exposes* a schema URL (e.g., `/api-docs`), note this URL prominently in your report.
 
@@ -354,7 +354,7 @@ Report generated at: (timestamp)
 
 ## 10) DELIVERABLE SUBMISSION (MANDATORY)
 
-After completing your analysis following the output format (including Sections 1–10), you MUST save your report using the `save_deliverable` tool.
+After completing your analysis following the output format (including Sections 1–14), you MUST save your report using the `save_deliverable` tool.
 
 **Required Tool Call:**
 ```json
@@ -369,7 +369,7 @@ After completing your analysis following the output format (including Sections 1
 
 **Critical Requirements:**
 1. The `content` field must contain your COMPLETE analysis in Markdown format
-2. Include ALL sections from the output format (Executive Summary through SSRF Sinks)
+2. Include ALL sections from the output format (Executive Summary through CODEI Execution Candidates; Sections 1–14)
 3. Wait for the `status: success` response before considering the task complete
 4. If you receive an error response, review and correct your content, then retry
 5. Do NOT submit placeholder text like `[Your complete markdown report ...]`.

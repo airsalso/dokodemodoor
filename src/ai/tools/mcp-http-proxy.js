@@ -1,5 +1,4 @@
 import chalk from 'chalk';
-import fetch from 'node-fetch';
 
 /**
  * HTTP/SSE-based MCP Client for remote servers
@@ -56,6 +55,10 @@ export class McpHttpProxy {
     }
 
     try {
+      // Use AbortController for timeout (Node.js 18+ built-in fetch doesn't support timeout option)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
       const response = await fetch(this.url, {
         method: 'POST',
         headers: {
@@ -63,8 +66,10 @@ export class McpHttpProxy {
           'Accept': 'application/json'
         },
         body: JSON.stringify(request),
-        timeout: 60000 // 60 second timeout
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);

@@ -103,25 +103,25 @@ export const MCP_AGENT_MAPPING = Object.freeze({
   // Phase 3: API Fuzzing (Non-browser)
   'api-fuzzer': 'api-fuzzer-agent',
 
-  // Phase 4: Vulnerability Analysis (Parallel agents)
+  // Phase 4: Vulnerability Analysis (Parallel agents — each on a separate Playwright instance)
   'vuln-sqli': 'playwright-agent1',
-  'vuln-codei': 'playwright-agent1',
-  'vuln-ssti': 'playwright-agent1',
-  'vuln-pathi': 'playwright-agent1',
-  'vuln-xss': 'playwright-agent2',
-  'vuln-auth': 'playwright-agent3',
-  'vuln-ssrf': 'playwright-agent4',
-  'vuln-authz': 'playwright-agent5',
+  'vuln-codei': 'playwright-agent2',
+  'vuln-ssti': 'playwright-agent3',
+  'vuln-pathi': 'playwright-agent4',
+  'vuln-xss': 'playwright-agent5',
+  'vuln-auth': 'playwright-agent6',
+  'vuln-ssrf': 'playwright-agent7',
+  'vuln-authz': 'playwright-agent8',
 
   // Phase 4: Exploitation (Parallel agents)
   'exploit-sqli': 'playwright-agent1',
-  'exploit-codei': 'playwright-agent1',
-  'exploit-ssti': 'playwright-agent1',
-  'exploit-pathi': 'playwright-agent1',
-  'exploit-xss': 'playwright-agent2',
-  'exploit-auth': 'playwright-agent3',
-  'exploit-ssrf': 'playwright-agent4',
-  'exploit-authz': 'playwright-agent5',
+  'exploit-codei': 'playwright-agent2',
+  'exploit-ssti': 'playwright-agent3',
+  'exploit-pathi': 'playwright-agent4',
+  'exploit-xss': 'playwright-agent5',
+  'exploit-auth': 'playwright-agent2',
+  'exploit-ssrf': 'playwright-agent3',
+  'exploit-authz': 'playwright-agent4',
 
   // Phase 5: Reporting
   // REMOVED: report doesn't need Playwright (document writing only)

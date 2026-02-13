@@ -173,6 +173,13 @@ A guard that does not dominate all control paths is insufficient.
 
 ## 7) EXECUTION MODEL (ANTI-LOOP CONTRACT)
 
+### 6.4 No Live Exploitation
+**This is an ANALYSIS phase.** You MUST NOT attempt to exploit any vulnerability you discover.
+- Do NOT perform actual privilege escalation, IDOR exploitation, or unauthorized data access against the running server.
+- Do NOT modify other users' data or access restricted resources.
+- Your job is to **prove reachability and defense mismatch** through code tracing and safe browser observation only.
+- Weaponization is the responsibility of the **exploitation phase**.
+
 ### 7.0 AUTHORIZATION ANALYSIS EFFICIENCY (CRITICAL)
 
 To ensure completion within the turn limit, you MUST follow these patterns:

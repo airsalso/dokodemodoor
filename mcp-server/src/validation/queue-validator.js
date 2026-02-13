@@ -228,3 +228,44 @@ export function validateQueueJson(content) {
     data: parsed,
   };
 }
+
+// ═════════════════════════════════════════════
+// Category-specific required fields for queue items
+// Ensures exploit prompts receive the fields they depend on
+// ═════════════════════════════════════════════
+
+const CATEGORY_REQUIRED_FIELDS = {
+  SQLI_QUEUE:  ['vulnerability_type', 'source', 'sink_call'],
+  CODEI_QUEUE: ['vulnerability_type', 'source', 'sink_call', 'execution_context'],
+  SSTI_QUEUE:  ['vulnerability_type', 'template_engine', 'render_call'],
+  PATHI_QUEUE: ['vulnerability_type', 'source', 'sink_call'],
+  XSS_QUEUE:   ['vulnerability_type', 'source', 'render_context', 'mismatch_reason'],
+  AUTH_QUEUE:   ['vulnerability_type', 'source_endpoint', 'suggested_exploit_technique'],
+  AUTHZ_QUEUE:  ['vulnerability_type', 'role_context', 'guard_evidence', 'minimal_witness'],
+  SSRF_QUEUE:   ['vulnerability_type', 'source', 'suggested_exploit_technique'],
+  OSV_QUEUE:    ['vulnerability_type'],
+};
+
+/**
+ * [목적] 카테고리별 필수 필드 검증 (warning 레벨).
+ * 필수 필드 누락 시 valid는 유지하되 warnings를 반환하여
+ * exploit 단계 품질 저하를 사전에 감지한다.
+ *
+ * @param {Object} parsed - validateQueueJson()에서 파싱된 데이터
+ * @param {string} queueType - DeliverableType (e.g. 'SQLI_QUEUE')
+ * @returns {{ warnings: string[] }}
+ */
+export function validateCategoryFields(parsed, queueType) {
+  const warnings = [];
+  const requiredFields = CATEGORY_REQUIRED_FIELDS[queueType];
+  if (!requiredFields || !parsed?.vulnerabilities) return { warnings };
+
+  for (let i = 0; i < parsed.vulnerabilities.length; i++) {
+    const entry = parsed.vulnerabilities[i];
+    const missing = requiredFields.filter(f => !entry[f] || (typeof entry[f] === 'string' && !entry[f].trim()));
+    if (missing.length > 0) {
+      warnings.push(`vulnerabilities[${i}] (${entry.ID || 'no-ID'}): missing exploit-critical fields: ${missing.join(', ')}`);
+    }
+  }
+  return { warnings };
+}

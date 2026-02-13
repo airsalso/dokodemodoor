@@ -162,8 +162,8 @@ export function validateEvidenceJson(content) {
 
   if (parsed.vulnerabilities.length === 0) {
     return {
-      valid: false,
-      message: `Invalid evidence structure: 'vulnerabilities' must contain at least one entry.`,
+      valid: true,
+      data: parsed,
     };
   }
 

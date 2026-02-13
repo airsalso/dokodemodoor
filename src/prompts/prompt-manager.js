@@ -357,6 +357,7 @@ async function interpolateVariables(template, variables, config = null, baseDir 
         // Ignore math/expression examples, common SSTI payloads, or user input placeholders
         if (p.includes('*') ||
             pLower.includes('user_input') ||
+            pLower.includes('user') || // XSS examples like {{user}} in <img src={{user}}>
             pLower.includes('expr') ||
             pLower.includes('config') ||
             pLower.includes('request') ||

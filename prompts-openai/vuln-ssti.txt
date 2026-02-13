@@ -352,7 +352,7 @@ When uncertain, **round down**.
 ## COMPLETION CONDITION
 
 ONLY AFTER:
-- All TodoWrite tasks for Recon 9 are completed (or explicitly marked not found)
+- All TodoWrite tasks are completed (or explicitly marked not found)
 - BOTH deliverables are successfully saved (validation success)
 
 Announce:

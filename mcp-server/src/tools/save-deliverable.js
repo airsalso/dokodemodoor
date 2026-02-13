@@ -9,10 +9,10 @@ import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { DeliverableType, DELIVERABLE_FILENAMES, isQueueType, isEvidenceType } from '../types/deliverables.js';
 import { createToolResult } from '../types/tool-responses.js';
-import { validateQueueJson } from '../validation/queue-validator.js';
+import { validateQueueJson, validateCategoryFields } from '../validation/queue-validator.js';
 import { validateEvidenceJson } from '../validation/evidence-validator.js';
 import { saveDeliverableFile } from '../utils/file-operations.js';
-import { existsSync, readFileSync, appendFileSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { getTargetDir } from '../../../src/utils/context.js';
 import { createValidationError, createGenericError } from '../utils/error-formatter.js';
@@ -75,6 +75,9 @@ export async function saveDeliverable(args) {
 
     let finalContent = content;
     const deliverablesDir = join(getTargetDir(), 'deliverables');
+    if (!existsSync(deliverablesDir)) {
+      mkdirSync(deliverablesDir, { recursive: true });
+    }
     const queueMergeLogPath = join(deliverablesDir, 'queue-merge.log');
     const logQueueMerge = (message) => {
       const timestamp = new Date().toISOString();
@@ -111,16 +114,40 @@ export async function saveDeliverable(args) {
           const incomingList = Array.isArray(incomingJson?.vulnerabilities) ? incomingJson.vulnerabilities : [];
 
           // [SMART DEDUPLICATION]
-          // Use a combination of vulnerability_type and source as a unique key
+          // Build a stable key across heterogeneous queue schemas.
           const seenKeys = new Set();
           const mergedList = [];
 
+          const normalizeKeyPart = (value) =>
+            String(value || '').toLowerCase().replace(/\s+/g, '');
+
+          const buildQueueUniqueKey = (item) => {
+            const typeKey = normalizeKeyPart(item.vulnerability_type);
+            // Primary location: endpoint/source where the vulnerability lives
+            const locationKey = normalizeKeyPart(
+              item.source ||
+              item.source_endpoint ||
+              item.endpoint ||
+              item.vulnerable_code_location ||
+              item.sink_call ||
+              item.render_call ||
+              item.ID
+            );
+            // Secondary discriminator: parameter/role that distinguishes same-endpoint findings
+            const paramKey = normalizeKeyPart(
+              item.vulnerable_parameter ||
+              item.parameter ||
+              item.param ||
+              item.role_context ||
+              ''
+            );
+
+            return `${typeKey}|${locationKey}|${paramKey}`;
+          };
+
           const addToList = (item) => {
             if (!item || typeof item !== 'object') return;
-            // Create a normalization key: lowercase and strip whitespace
-            const sourceKey = String(item.source || '').toLowerCase().replace(/\s+/g, '');
-            const typeKey = String(item.vulnerability_type || '').toLowerCase();
-            const uniqueKey = `${typeKey}|${sourceKey}`;
+            const uniqueKey = buildQueueUniqueKey(item);
 
             if (!seenKeys.has(uniqueKey)) {
               seenKeys.add(uniqueKey);
@@ -173,6 +200,15 @@ export async function saveDeliverable(args) {
           }
         );
         return createToolResult(errorResponse);
+      }
+
+      // Category-specific field validation (warning level — does not block save)
+      if (queueValidation.data) {
+        const { warnings } = validateCategoryFields(queueValidation.data, deliverable_type);
+        if (warnings.length > 0) {
+          console.log(`⚠️  [QUEUE FIELD WARNING] ${deliverable_type}: ${warnings.length} item(s) missing exploit-critical fields`);
+          warnings.forEach(w => console.log(`     → ${w}`));
+        }
       }
     }
 
@@ -232,12 +268,33 @@ export async function saveDeliverable(args) {
       finalContent = autoCloseJson(stripBodyFields(finalContent));
 
       const normalizeEvidenceJson = (raw) => {
-        const validation = validateEvidenceJson(raw);
-        if (!validation.valid) return raw;
-        const parsed = validation.data;
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          const validation = validateEvidenceJson(raw);
+          if (!validation.valid) return raw;
+          parsed = validation.data;
+        }
         if (!parsed?.vulnerabilities || !Array.isArray(parsed.vulnerabilities)) return raw;
 
+        const normalizeVerdict = (value) => {
+          const normalized = String(value || '').toUpperCase().trim();
+          if (['EXPLOITED', 'BLOCKED_BY_SECURITY', 'POTENTIAL'].includes(normalized)) {
+            return normalized;
+          }
+          if (normalized === 'FALSE_POSITIVE' || normalized === 'NOT VULNERABLE' || normalized === 'NOT_VULNERABLE') {
+            return 'BLOCKED_BY_SECURITY';
+          }
+          if (normalized === 'ATTEMPTED - FAILED' || normalized === 'ATTEMPTED_FAILED' || normalized === 'OUT_OF_SCOPE_INTERNAL') {
+            return 'POTENTIAL';
+          }
+          return normalized || 'POTENTIAL';
+        };
+
         for (const vuln of parsed.vulnerabilities) {
+          vuln.verdict = normalizeVerdict(vuln.verdict);
+
           if (!Array.isArray(vuln.evidence)) continue;
           for (const item of vuln.evidence) {
             if (item?.type === 'http_request_response') {

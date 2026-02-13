@@ -175,7 +175,7 @@ Only report vulnerabilities that are **externally exploitable**.
 **Example Playwright Workflow:**
 ```
 1. {{MCP_SERVER}}__browser_navigate → {{WEB_URL}}/import
-2. {{MCP_SERVER}}__browser_type → http://callback.example.com/test
+2. {{MCP_SERVER}}__browser_type → {{EXTERNAL_TEST_DOMAIN}}/ssrf-test
 3. {{MCP_SERVER}}__browser_click → Submit
 4. {{MCP_SERVER}}__browser_network_requests → Check for outbound requests
 ```
@@ -185,10 +185,17 @@ If callback verification is not possible or fails, prioritize **code‑based val
 
 ---
 
-### 6.2 Task Management
+### 6.2 No Live Exploitation
+**This is an ANALYSIS phase.** You MUST NOT attempt to exploit any vulnerability you discover.
+- Do NOT send actual SSRF payloads to internal services (127.0.0.1, 169.254.169.254, etc.).
+- Do NOT attempt to exfiltrate cloud metadata or access internal APIs through discovered sinks.
+- Your job is to **prove reachability and defense mismatch** through code tracing and safe browser observation only.
+- Weaponization is the responsibility of the **exploitation phase**.
+
+### 6.3 Task Management
 You MUST follow the auto-injected `todo.txt`. If code tracing discovers additional network-reachable request sinks not listed in the original plan, use `TodoWrite` to **add** them to the bottom of the list without removing existing items.
 
-### 6.3 Execution Control & Stop Rules (MANDATORY)
+### 6.4 Execution Control & Stop Rules (MANDATORY)
 @include(shared/_analysis-efficiency-limits.txt)
 @include(shared/_analysis-stop-rules.txt)
 
@@ -349,7 +356,7 @@ When uncertain, **round down**.
 ## COMPLETION CONDITION
 
 ONLY AFTER:
-- All TodoWrite tasks for Recon 9 are completed (or explicitly marked not found)
+- All TodoWrite tasks are completed (or explicitly marked not found)
 - BOTH deliverables are successfully saved
 
 Announce:

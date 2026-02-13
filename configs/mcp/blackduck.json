@@ -1,13 +1,8 @@
 {
   "mcpServers": {
-    "blackduck": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/your/blackduck-mcp-server/index.js"],
-      "env": {
-        "BLACKDUCK_URL": "https://your-blackduck-server.com",
-        "BLACKDUCK_API_TOKEN": "your-api-token"
-      }
+    "blackduckhub-mcp":{
+      "type": "http",
+      "url": "https://test.co.kr/bdhub/mcp"
     }
   }
 }

@@ -59,13 +59,13 @@ The top-level object must contain a `vulnerabilities` array.
 
 **CRITICAL RULES:**
 1. **JSON Only**: The `content` parameter for `save_deliverable` MUST be a valid JSON string when saving `*_EVIDENCE` types.
-2. **Non-Empty Evidence**: The `vulnerabilities` array MUST contain at least one entry. Do NOT save empty arrays.
-2. **Full context**: Every HTTP request must include the full URL and all necessary headers.
-3. **Sensitive data**: Mask passwords/codes with `[REDACTED]`.
-4. **Tooling**: Use `TaskAgent` to automate evidence collection where possible.
-5. **Screenshots**: If you use Playwright, ALWAYS take a screenshot of the final success state and include it in the JSON.
-6. **If a required tool is unavailable**: Explain the limitation in `impact_summary` and add a reproduction step describing the constraint. Do **NOT** invent new evidence types.
-7. **No fabricated evidence**: Only include responses you actually observed from tool output. If the command failed, record the failure and re-run; do not invent status codes or bodies.
-8. **Evidence item shape**: Evidence entries MUST be objects with `type` and `description`. Do NOT use plain strings.
-9. **Verdict constraints**: Only `EXPLOITED`, `BLOCKED_BY_SECURITY`, or `POTENTIAL` are valid. Never use `FALSE_POSITIVE` in evidence; record false positives in the tracking file if applicable.
-10. **Allowed evidence types**: Use only `http_request_response`, `screenshot`, or `session_state` unless you have a concrete, tool-produced artifact that clearly fits another type. Do NOT use `log` as a type.
+2. **Queue-Empty Exception**: If the exploitation queue is truly empty, `{"vulnerabilities":[]}` is allowed. Otherwise include one entry per processed queue item.
+3. **Full context**: Every HTTP request must include the full URL and all necessary headers.
+4. **Sensitive data**: Mask passwords/codes with `[REDACTED]`.
+5. **Tooling**: Use `TaskAgent` to automate evidence collection where possible.
+6. **Screenshots**: If you use Playwright, ALWAYS take a screenshot of the final success state and include it in the JSON.
+7. **If a required tool is unavailable**: Explain the limitation in `impact_summary` and add a reproduction step describing the constraint. Do **NOT** invent new evidence types.
+8. **No fabricated evidence**: Only include responses you actually observed from tool output. If the command failed, record the failure and re-run; do not invent status codes or bodies.
+9. **Evidence item shape**: Evidence entries MUST be objects with `type` and `description`. Do NOT use plain strings.
+10. **Verdict constraints**: Only `EXPLOITED`, `BLOCKED_BY_SECURITY`, or `POTENTIAL` are valid. If you internally use labels like `FALSE_POSITIVE`, `NOT_VULNERABLE`, `ATTEMPTED - FAILED`, or `OUT_OF_SCOPE_INTERNAL`, map them before saving.
+11. **Allowed evidence types**: Use only `http_request_response`, `screenshot`, or `session_state` unless you have a concrete, tool-produced artifact that clearly fits another type. Do NOT use `log` as a type.

@@ -113,10 +113,15 @@ export async function loadPreviousVulnerabilities(sourceDir) {
         result.vulnerabilityTypes.add(vulnType);
         result.byType[vulnType] = (result.byType[vulnType] || 0) + vulnCount;
 
-        // Extract analyzed file paths
+        // Extract analyzed file paths (with fallback for categories without 'path' field)
         queue.vulnerabilities.forEach(vuln => {
-          if (vuln.path) {
-            result.analyzedFiles.add(vuln.path);
+          const filePath = vuln.path
+            || vuln.vulnerable_code_location
+            || vuln.source_endpoint
+            || vuln.source
+            || vuln.endpoint;
+          if (filePath) {
+            result.analyzedFiles.add(filePath);
           }
         });
 

@@ -183,10 +183,17 @@ Only report vulnerabilities that are **externally exploitable**.
 
 ---
 
-### 6.2 Task Management
+### 6.2 No Live Exploitation
+**This is an ANALYSIS phase.** You MUST NOT attempt to exploit any vulnerability you discover.
+- Do NOT brute-force credentials, bypass authentication, or forge tokens against the running server.
+- Do NOT escalate privileges or manipulate sessions.
+- Your job is to **prove reachability and defense mismatch** through code tracing and safe browser observation only.
+- Weaponization is the responsibility of the **exploitation phase**.
+
+### 6.3 Task Management
 You MUST follow the auto-injected `todo.txt`. If code tracing discovers additional network-reachable auth flows or side-effect endpoints not listed in the original plan, use `TodoWrite` to **add** them to the bottom of the list without removing existing items.
 
-### 6.3 Execution Control & Stop Rules (MANDATORY)
+### 6.4 Execution Control & Stop Rules (MANDATORY)
 @include(shared/_analysis-efficiency-limits.txt)
 @include(shared/_analysis-stop-rules.txt)
 
@@ -361,7 +368,7 @@ Each vulnerability object MUST follow this exact format:
 ```
 @include(shared/_json-hygiene.txt)
 
-**Inclusion Rule:**: ONLY include items with `externally_exploitable: true`.
+**Inclusion Rule:** ONLY include items with `externally_exploitable: true`.
 
 ---
 

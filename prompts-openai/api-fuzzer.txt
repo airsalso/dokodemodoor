@@ -45,7 +45,7 @@ Your mission is to enrich the current **Application Security Map** by performing
   - Use the cookies, headers, and storage data provided there for all Schemathesis requests (e.g., using `--header` or `--auth` flags).
   - If not provided, search existing reconnaissance deliverables for authentication mechanisms.
   - Look for JWT tokens, API keys, session cookies in source code.
-- **Systematic Tracking**: Use `TodoRead` and `TodoWrite` to manage your progress across various API surface areas.
+- **Systematic Tracking**: Use `TodoWrite` to manage your progress across various API surface areas. Read the auto-injected `todo.txt` as needed.
 - **Fuzzing Input List (MANDATORY)**: Create a short list (table or JSON) with:
   - `method`, `path`, `auth_required`, `params` (query/body/path)
   - Limit to the top 30 highest-signal endpoints if the list is large.
