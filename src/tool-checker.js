@@ -11,7 +11,7 @@ import chalk from 'chalk';
  * [반환값]
  * - Promise<object>
  */
-export const checkToolAvailability = async () => {
+export const checkToolAvailability = async (mode = 'web') => {
   // Check if tool check should be skipped
   const { config } = await import('./config/env.js').catch(() => ({ config: null }));
 
@@ -21,7 +21,12 @@ export const checkToolAvailability = async () => {
   }
 
   // Categories of tools
-  const toolChain = {
+  const isLinux = process.platform === 'linux';
+  const toolChain = mode === 're' ? {
+    infrastructure: ['git'],
+    're-inventory': isLinux ? ['file', 'readelf', 'diec'] : ['sigcheck64', 'diec'],
+    're-static': ['analyzeHeadless']
+  } : {
     infrastructure: ['git', 'curl'],
     reconnaissance: ['nmap', 'subfinder', 'whatweb'],
     analysis: ['semgrep', 'schemathesis', 'rg'],
@@ -71,7 +76,12 @@ export const handleMissingTools = (toolAvailability) => {
       'semgrep': 'python3 -m pip install semgrep',
       'schemathesis': 'pip install schemathesis',
       'sqlmap': 'pip install sqlmap',
-      'rg': 'sudo apt install ripgrep'
+      'rg': 'sudo apt install ripgrep',
+      'file': 'sudo apt install file',
+      'readelf': 'sudo apt install binutils',
+      'diec': 'Detect It Easy CLI: https://github.com/horsicq/DIE-engine/releases',
+      'analyzeHeadless': 'Ghidra: https://ghidra-sre.org/ (set GHIDRA_HOME env var)',
+      'sigcheck64': 'Windows Sysinternals: https://learn.microsoft.com/en-us/sysinternals/downloads/sigcheck'
     };
 
     console.log(chalk.white('\n📋 INSTALLATION GUIDE:'));

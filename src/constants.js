@@ -63,7 +63,13 @@ export const PHASE_TOOL_REQUIREMENTS = Object.freeze({
   },
   'osv-analysis': {
     playwright: false  // Source code and API analysis, no browser needed
-  }
+  },
+  // Reverse Engineering phases (no browser needed)
+  're-inventory': { playwright: false },
+  're-static-analysis': { playwright: false },
+  're-dynamic-observation': { playwright: false },
+  're-network-analysis': { playwright: false },
+  're-reporting': { playwright: false }
 });
 
 /**
@@ -121,7 +127,15 @@ export const MCP_AGENT_MAPPING = Object.freeze({
   // REMOVED: report doesn't need Playwright (document writing only)
 
   // OSV Analysis agent
-  'osv-analysis': 'dokodemodoor-helper'
+  'osv-analysis': 'dokodemodoor-helper',
+
+  // Reverse Engineering agents
+  're-inventory': 're-sigcheck',
+  're-static': 're-ghidra',
+  're-dynamic': 're-procmon',
+  're-instrument': 're-frida',
+  're-network': 're-tshark',
+  're-report': 'dokodemodoor-helper'
 });
 
 // Direct agent-to-validator mapping - much simpler than pattern matching
@@ -242,5 +256,32 @@ export const AGENT_VALIDATORS = Object.freeze({
       return false;
     }
     return true;
+  },
+
+  // Reverse Engineering agents
+  're-inventory': async (sourceDir) => {
+    const f = path.join(sourceDir, 'deliverables', 're_inventory_deliverable.md');
+    return await fs.pathExists(f);
+  },
+  're-static': async (sourceDir) => {
+    const analysis = path.join(sourceDir, 'deliverables', 're_static_analysis_deliverable.md');
+    const candidates = path.join(sourceDir, 'deliverables', 're_observation_candidates.json');
+    return (await fs.pathExists(analysis)) && (await fs.pathExists(candidates));
+  },
+  're-dynamic': async (sourceDir) => {
+    const f = path.join(sourceDir, 'deliverables', 're_dynamic_observation_deliverable.md');
+    return await fs.pathExists(f);
+  },
+  're-instrument': async (sourceDir) => {
+    const f = path.join(sourceDir, 'deliverables', 're_instrumentation_deliverable.md');
+    return await fs.pathExists(f);
+  },
+  're-network': async (sourceDir) => {
+    const f = path.join(sourceDir, 'deliverables', 're_network_analysis_deliverable.md');
+    return await fs.pathExists(f);
+  },
+  're-report': async (sourceDir) => {
+    const f = path.join(sourceDir, 'deliverables', 're_comprehensive_report.md');
+    return await fs.pathExists(f);
   }
 });

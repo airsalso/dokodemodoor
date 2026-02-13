@@ -215,6 +215,50 @@ export const AGENTS = Object.freeze({
     phase: 'osv-analysis',
     order: 23,
     prerequisites: []
+  },
+
+  // Reverse Engineering agents (Standalone pipeline via re-scanner.mjs)
+  're-inventory': {
+    name: 're-inventory',
+    displayName: 'RE Pre-Inventory agent',
+    phase: 're-inventory',
+    order: 101,
+    prerequisites: []
+  },
+  're-static': {
+    name: 're-static',
+    displayName: 'RE Static Analysis agent',
+    phase: 're-static-analysis',
+    order: 102,
+    prerequisites: ['re-inventory']
+  },
+  're-dynamic': {
+    name: 're-dynamic',
+    displayName: 'RE Dynamic Observation agent',
+    phase: 're-dynamic-observation',
+    order: 103,
+    prerequisites: ['re-static']
+  },
+  're-instrument': {
+    name: 're-instrument',
+    displayName: 'RE Runtime Instrumentation agent',
+    phase: 're-dynamic-observation',
+    order: 104,
+    prerequisites: ['re-static']
+  },
+  're-network': {
+    name: 're-network',
+    displayName: 'RE Network Analysis agent',
+    phase: 're-network-analysis',
+    order: 105,
+    prerequisites: ['re-dynamic', 're-instrument']
+  },
+  're-report': {
+    name: 're-report',
+    displayName: 'RE Report agent',
+    phase: 're-reporting',
+    order: 106,
+    prerequisites: ['re-network']
   }
 
 });
@@ -238,6 +282,23 @@ export const PHASE_ORDER = Object.freeze([
   'reporting'
 ]);
 
+// Reverse Engineering phase definitions (standalone pipeline)
+export const RE_PHASES = Object.freeze({
+  're-inventory': ['re-inventory'],
+  're-static-analysis': ['re-static'],
+  're-dynamic-observation': ['re-dynamic', 're-instrument'],
+  're-network-analysis': ['re-network'],
+  're-reporting': ['re-report']
+});
+
+export const RE_PHASE_ORDER = Object.freeze([
+  're-inventory',
+  're-static-analysis',
+  're-dynamic-observation',
+  're-network-analysis',
+  're-reporting'
+]);
+
 
 /**
  * [목적] 에이전트 이름을 단계 순서 인덱스로 매핑.
@@ -256,6 +317,7 @@ export const PHASE_ORDER = Object.freeze([
  */
 export const getPhaseIndexForAgent = (agentName) => {
   if (agentName === 'osv-analysis') return 99; // Standalone/manual bypass
+  if (agentName.startsWith('re-')) return 100; // RE pipeline bypass (standalone)
   const agent = validateAgent(agentName);
   const phaseIndex = PHASE_ORDER.indexOf(agent.phase);
 
@@ -938,7 +1000,7 @@ export const getNextAgent = (session) => {
 
   // Find the next agent that hasn't been completed and has all prerequisites
   const nextAgent = Object.values(AGENTS)
-    .filter(a => a.name !== 'osv-analysis') // Exclude standalone agent from main sequence
+    .filter(a => a.name !== 'osv-analysis' && !a.name.startsWith('re-')) // Exclude standalone agents from main sequence
     .sort((a, b) => a.order - b.order)
     .find(agent => {
       if (completed.has(agent.name)) return false; // Already completed

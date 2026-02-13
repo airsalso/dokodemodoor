@@ -1,0 +1,9 @@
+<re-target>
+## 분석 대상 바이너리 정보
+
+- **바이너리 경로**: {{BINARY_PATH}}
+- **심볼 파일 경로 (PDB/DWARF)**: {{SYMBOLS_PATH}}
+- **프로세스 이름**: {{PROCESS_NAME}}
+- **분석 초점**: {{ANALYSIS_FOCUS}}
+- **작업 디렉토리**: {{REPO_PATH}}
+</re-target>

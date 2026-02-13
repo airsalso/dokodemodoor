@@ -180,6 +180,19 @@ function getAgentPhase(agentName) {
     return 'osv-analysis';
   }
 
+  // Reverse Engineering agents (standalone pipeline)
+  const rePhaseMap = {
+    're-inventory': 're-inventory',
+    're-static': 're-static-analysis',
+    're-dynamic': 're-dynamic-observation',
+    're-instrument': 're-dynamic-observation',
+    're-network': 're-network-analysis',
+    're-report': 're-reporting'
+  };
+  if (rePhaseMap[agentName]) {
+    return rePhaseMap[agentName];
+  }
+
   // Unknown agent
   return null;
 }

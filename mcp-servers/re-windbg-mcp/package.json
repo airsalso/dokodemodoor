@@ -1,0 +1,10 @@
+{
+  "name": "@dokodemodoor/re-windbg-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "zod": "^3.22.4"
+  }
+}

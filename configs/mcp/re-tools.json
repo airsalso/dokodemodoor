@@ -1,0 +1,50 @@
+{
+  "mcpServers": {
+    "re-sigcheck": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp-servers/re-sigcheck-mcp/index.js"],
+      "env": {
+        "DIE_PATH": "diec"
+      }
+    },
+    "re-ghidra": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp-servers/re-ghidra-mcp/bridge-wrapper.js"],
+      "env": {
+        "GHIDRA_MCP_DIR": "/opt/ghidra-mcp",
+        "GHIDRA_MCP_HTTP_PORT": "8080"
+      }
+    },
+    "re-windbg": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp-servers/re-windbg-mcp/index.js"],
+      "env": {
+        "DEBUGGER_PATH": "gdb"
+      }
+    },
+    "re-procmon": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp-servers/re-procmon-mcp/index.js"],
+      "env": {
+        "STRACE_PATH": "strace"
+      }
+    },
+    "re-frida": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp-servers/re-frida-mcp/index.js"]
+    },
+    "re-tshark": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp-servers/re-tshark-mcp/index.js"],
+      "env": {
+        "TSHARK_PATH": "tshark"
+      }
+    }
+  }
+}

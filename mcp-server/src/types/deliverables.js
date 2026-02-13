@@ -78,6 +78,18 @@ export const DeliverableType = {
 
   // Pre-recon agent (Bottom to prevent accidental reuse in later phases)
   CODE_ANALYSIS: 'CODE_ANALYSIS',
+
+  // Reverse Engineering deliverables
+  RE_INVENTORY: 'RE_INVENTORY',
+  RE_STATIC_ANALYSIS: 'RE_STATIC_ANALYSIS',
+  RE_OBSERVATION_CANDIDATES: 'RE_OBSERVATION_CANDIDATES',
+  RE_DYNAMIC_OBSERVATION: 'RE_DYNAMIC_OBSERVATION',
+  RE_BEHAVIORAL_LOG: 'RE_BEHAVIORAL_LOG',
+  RE_INSTRUMENTATION: 'RE_INSTRUMENTATION',
+  RE_HOOK_LOGS: 'RE_HOOK_LOGS',
+  RE_NETWORK_ANALYSIS: 'RE_NETWORK_ANALYSIS',
+  RE_NETWORK_SESSIONS: 'RE_NETWORK_SESSIONS',
+  RE_COMPREHENSIVE_REPORT: 'RE_COMPREHENSIVE_REPORT',
 };
 
 
@@ -124,6 +136,18 @@ export const DELIVERABLE_FILENAMES = {
   [DeliverableType.OSV_QUEUE]: 'osv_exploitation_queue.json',
   [DeliverableType.API_FUZZ_REPORT]: 'api_fuzzer_deliverable.md',
   [DeliverableType.AUTH_SESSION]: 'auth_session.json',
+
+  // Reverse Engineering deliverables
+  [DeliverableType.RE_INVENTORY]: 're_inventory_deliverable.md',
+  [DeliverableType.RE_STATIC_ANALYSIS]: 're_static_analysis_deliverable.md',
+  [DeliverableType.RE_OBSERVATION_CANDIDATES]: 're_observation_candidates.json',
+  [DeliverableType.RE_DYNAMIC_OBSERVATION]: 're_dynamic_observation_deliverable.md',
+  [DeliverableType.RE_BEHAVIORAL_LOG]: 're_behavioral_log.json',
+  [DeliverableType.RE_INSTRUMENTATION]: 're_instrumentation_deliverable.md',
+  [DeliverableType.RE_HOOK_LOGS]: 're_hook_logs.json',
+  [DeliverableType.RE_NETWORK_ANALYSIS]: 're_network_analysis_deliverable.md',
+  [DeliverableType.RE_NETWORK_SESSIONS]: 're_network_sessions.json',
+  [DeliverableType.RE_COMPREHENSIVE_REPORT]: 're_comprehensive_report.md',
 };
 
 
