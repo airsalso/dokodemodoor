@@ -1,4 +1,6 @@
 .env
+.env.20b
+.env.qwen3.235b
 .dokodemodoor-store.json
 .dokodemodoor-store.json.lock
 .dokodemodoor-store.json.tmp
