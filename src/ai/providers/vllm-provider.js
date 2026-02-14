@@ -55,12 +55,13 @@ export class VLLMProvider extends LLMProvider {
     this.client = new OpenAI({
       baseURL: config.baseURL,
       apiKey: config.apiKey || 'EMPTY',
-      timeout: 180000 // 3 minutes
+      timeout: typeof config.timeoutMs === 'number' ? config.timeoutMs : 900000
     });
     this.model = config.model;
     this.temperature = config.temperature || 0.1;
     this.maxTurns = config.maxTurns || 100;
     this.maxPromptChars = config.maxPromptChars || 32000;
+    this.maxContextTokens = config.maxContextTokens ?? 32768;
     this.promptTokenPrice = config.promptTokenPrice || 0;
     this.completionTokenPrice = config.completionTokenPrice || 0;
   }
@@ -753,6 +754,18 @@ export class VLLMProvider extends LLMProvider {
       }
     }
 
+    // [롱텀 메모리 보존] 압축 마커([HISTORY COMPRESSED] + findings_*.md 목록)가 잘렸으면 다시 삽입
+    const compressionMarker = messages[1];
+    if (compressionMarker && typeof compressionMarker.content === 'string' && compressionMarker.content.includes('[HISTORY COMPRESSED]')) {
+      if (!trimmed.includes(compressionMarker)) {
+        trimmed = [trimmed[0], compressionMarker, ...trimmed.slice(1)];
+        if (totalSize(trimmed) > maxChars) {
+          const markerLimit = Math.max(500, Math.floor(maxChars * 0.2));
+          trimmed[1] = this.truncateMessageContent(compressionMarker, markerLimit);
+        }
+      }
+    }
+
     return trimmed;
   }
 
@@ -833,9 +846,32 @@ export class VLLMProvider extends LLMProvider {
     let finished = false;
     let savedTypes = new Set();
     const maxTurns = options.maxTurns || this.maxTurns;
+    const maxEmptyResponseNudgesRaw = dokodemodoorConfig?.dokodemodoor?.vllmEmptyResponseMaxNudges;
+    const maxEmptyResponseNudges = (typeof maxEmptyResponseNudgesRaw === 'number' && Number.isFinite(maxEmptyResponseNudgesRaw))
+      ? Math.max(0, maxEmptyResponseNudgesRaw)
+      : 2;
     let allowGraceTurns = true; // Enabled by default to provide a safety buffer at the turn limit
     const startTime = Date.now();
     let cumulativeUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+    // [동적 상한] 파일 오픈/검색 cap 및 이미 읽은 경로·검색 이력
+    const fileOpenCap = typeof options.fileOpenCap === 'number' ? options.fileOpenCap : null;
+    const searchCap = typeof options.searchCap === 'number' ? options.searchCap : null;
+    let openCount = 0;
+    let searchCount = 0;
+    const openedPaths = new Set();
+    const searchHistory = new Map(); // key: "path|query", value: 호출 횟수
+
+    const normPath = (baseDir, p) => {
+      if (!p || typeof p !== 'string') return '';
+      try {
+        const resolved = path.resolve(baseDir, p);
+        const rel = path.relative(baseDir, resolved);
+        return rel || '.';
+      } catch {
+        return String(p);
+      }
+    };
 
     // Semantic Loop Tracking
     let toolUsageHistory = [];
@@ -1030,13 +1066,20 @@ export class VLLMProvider extends LLMProvider {
             console.log(chalk.cyan(`    📤 Sending to vLLM: ${finalSize} chars (${Math.round(finalSize/this.maxPromptChars*100)}% of limit), ${readyMessages.length} messages`));
           }
 
+          // Cap max_tokens so prompt + completion does not exceed model context (avoids 400 "max_tokens must be at least 1, got -N")
+          const estimatedPromptTokens = Math.ceil(finalSize / 3); // conservative: ~3 chars per token
+          const safeMaxTokens = Math.max(1, Math.min(32768, this.maxContextTokens - estimatedPromptTokens));
+          if (safeMaxTokens < 256 && shouldLogPromptSize) {
+            console.log(chalk.yellow(`    ⚠️  Prompt ~${estimatedPromptTokens} tokens leaves only ${safeMaxTokens} for completion. Consider VLLM_MAX_PROMPT_CHARS or VLLM_MAX_CONTEXT_TOKENS.`));
+          }
+
             response = await this.client.chat.completions.create({
               model: this.model,
               messages: readyMessages,
               tools: registry.getOpenAITools(),
               tool_choice: toolChoice,
               temperature: this.temperature,
-              max_tokens: 32768, // Crucial for large reports (32KB+)
+              max_tokens: safeMaxTokens,
               // Remove penalties: they cause "stuttering" (......) when models try to output
               // repetitive technical content or markdown separators.
               //frequency_penalty: 0,
@@ -1204,6 +1247,8 @@ export class VLLMProvider extends LLMProvider {
         const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
 
         if (hasToolCalls) {
+          // We got a concrete action; reset empty-response nudging state.
+          nudgeCount = 0;
           messages.push(message);
           yield { type: 'assistant', message: { role: 'assistant', content: message.content || '' } };
 
@@ -1232,6 +1277,44 @@ export class VLLMProvider extends LLMProvider {
                 }
               }
 
+              if (toolName === 'open_file') {
+                const np = normPath(targetDir, args.path);
+                if (openedPaths.has(np)) {
+                  console.log(chalk.bold.blue(`    ♻️  Already read: ${np}`));
+                  let alreadyReadMessage = 'Already read (see prior turns).';
+                  const missionDir = this.getMissionDir(targetDir, missionName, agentName);
+                  const rawFilename = (args.path || 'unknown').toString().split('/').pop();
+                  const targetName = rawFilename.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+                  const stagedPath = path.join(missionDir, `staged_source_${targetName}.md`);
+                  if (fs.existsSync(stagedPath)) {
+                    const relStaged = path.relative(targetDir, stagedPath);
+                    alreadyReadMessage = `Already read (see prior turns). Staged copy: \`${relStaged}\` — open this path if you need to re-read the content.`;
+                  }
+                  immediateResults.push({ role: 'tool', tool_call_id: tc.id, name: toolName, content: JSON.stringify({ status: 'skipped', message: alreadyReadMessage }) });
+                  continue;
+                }
+                if (fileOpenCap != null && openCount >= fileOpenCap) {
+                  console.log(chalk.yellow(`    ⛔ Cap reached (file opens: ${openCount}/${fileOpenCap})`));
+                  immediateResults.push({ role: 'tool', tool_call_id: tc.id, name: toolName, content: JSON.stringify({ status: 'cap_reached', message: 'Cap reached (file opens). Proceed to save_deliverable and finish.' }) });
+                  continue;
+                }
+              }
+
+              if (toolName === 'search_file') {
+                const searchKey = normPath(targetDir, args.path || '') + '|' + (args.query || '');
+                const searchCnt = searchHistory.get(searchKey) || 0;
+                if (searchCnt >= 2) {
+                  console.log(chalk.bold.blue(`    ♻️  Same search: ${searchKey.slice(0, 50)}...`));
+                  immediateResults.push({ role: 'tool', tool_call_id: tc.id, name: toolName, content: JSON.stringify({ status: 'skipped', message: 'Same search already performed. Use prior result.' }) });
+                  continue;
+                }
+                if (searchCap != null && searchCount >= searchCap) {
+                  console.log(chalk.yellow(`    ⛔ Cap reached (searches: ${searchCount}/${searchCap})`));
+                  immediateResults.push({ role: 'tool', tool_call_id: tc.id, name: toolName, content: JSON.stringify({ status: 'cap_reached', message: 'Cap reached (searches). Proceed to save_deliverable and finish.' }) });
+                  continue;
+                }
+              }
+
               if (toolName === 'save_deliverable') {
                 args.deliverable_type = this.getForcedDeliverableType(agentName, args.deliverable_type);
               }
@@ -1249,6 +1332,29 @@ export class VLLMProvider extends LLMProvider {
 
           for (const tc of validToolCalls) yield { type: 'tool_use', name: tc.name, input: tc.arguments };
           const actual = await runWithContext({ agentName, targetDir }, () => executeToolCalls(validToolCalls, registry));
+
+          for (const tc of validToolCalls) {
+            if (tc.name === 'open_file') {
+              openedPaths.add(normPath(targetDir, tc.arguments.path));
+              openCount++;
+            }
+            if (tc.name === 'search_file') {
+              const searchKey = normPath(targetDir, tc.arguments.path || '') + '|' + (tc.arguments.query || '');
+              searchHistory.set(searchKey, (searchHistory.get(searchKey) || 0) + 1);
+              searchCount++;
+            }
+          }
+
+          const immediateMap = new Map(immediateResults.map(r => [r.tool_call_id, r]));
+          let actualIdx = 0;
+          const orderedResults = [];
+          for (const tc of message.tool_calls) {
+            if (immediateMap.has(tc.id)) {
+              orderedResults.push(immediateMap.get(tc.id));
+            } else {
+              orderedResults.push(actual[actualIdx++]);
+            }
+          }
 
           for (let i = 0; i < validToolCalls.length; i++) {
             const tc = validToolCalls[i];
@@ -1330,28 +1436,58 @@ export class VLLMProvider extends LLMProvider {
             }
 
             if (tc.name === 'open_file' && res.content && res.content.length > 3000) {
-               const missionDir = this.getMissionDir(targetDir, missionName, agentName);
-               if (!fs.existsSync(missionDir)) fs.mkdirSync(missionDir, { recursive: true });
-               const targetName = tc.arguments.path.split('/').pop().replace(/[^a-z0-9]/g, '_').substring(0, 30);
-               const filePath = path.join(missionDir, `staged_source_${targetName}.md`);
-               if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, `# Staged: ${tc.arguments.path}\n\n\`\`\`\n${res.content}\n\`\`\``);
+              const missionDir = this.getMissionDir(targetDir, missionName, agentName);
+              if (!fs.existsSync(missionDir)) fs.mkdirSync(missionDir, { recursive: true });
+
+              const rawFilename = (tc.arguments?.path || 'unknown').toString().split('/').pop();
+              const targetName = rawFilename.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+              const filePath = path.join(missionDir, `staged_source_${targetName}.md`);
+
+              // Store the actual file contents (not the tool wrapper JSON) to avoid nested JSON bloat.
+              let stagedText = res.content;
+              try {
+                const parsed = JSON.parse(res.content);
+                if (parsed && typeof parsed === 'object') {
+                  if (typeof parsed.content === 'string') {
+                    stagedText = parsed.content;
+                  } else if (Array.isArray(parsed.content)) {
+                    const parts = parsed.content
+                      .map((p) => (p && typeof p === 'object' ? p.text : null))
+                      .filter((t) => typeof t === 'string');
+                    if (parts.length > 0) stagedText = parts.join('\n');
+                  }
+                }
+              } catch (e) {
+                // Keep original stagedText
+              }
+
+              if (!fs.existsSync(filePath)) {
+                fs.writeFileSync(filePath, `# Staged: ${tc.arguments.path}\n\n\`\`\`\n${stagedText}\n\`\`\``);
+              }
             }
           }
 
-          messages.push(...actual);
-          for (const res of actual) yield { type: 'tool_result', content: res.content };
+          messages.push(...orderedResults);
+          for (const res of orderedResults) yield { type: 'tool_result', content: res.content };
           continue;
         }
 
         if (choice.finish_reason === 'stop') {
            if (!content && !hasToolCalls) {
-             console.log(chalk.yellow(`    ⚠️ Empty response detected. Nudging (Attempt ${nudgeCount + 1}/2)...`));
-             if (nudgeCount++ < 2) {
-               const nudge = { role: 'user', content: `[SYSTEM NOTICE] You provided an empty response. Please continue analysis or provide ## Summary.` };
+             if (nudgeCount < maxEmptyResponseNudges) {
+               nudgeCount += 1;
+               console.log(chalk.yellow(`    ⚠️ Empty response detected. Nudging (Attempt ${nudgeCount}/${maxEmptyResponseNudges})...`));
+
+               const isLastNudge = nudgeCount >= maxEmptyResponseNudges;
+               const nudgeText = isLastNudge
+                 ? `[FINAL NOTICE] You provided an empty response again. You MUST respond with non-empty content now. If you are out of actions, output a short ## Summary and ensure any required deliverables are saved.`
+                 : `[SYSTEM NOTICE] You provided an empty response. Please continue analysis or provide ## Summary.`;
+               const nudge = { role: 'user', content: nudgeText };
                messages.push(message, nudge);
                yield { type: 'assistant', message: { role: 'system', content: nudge.content } };
                continue;
-             } else { throw new Error("Agent stuck in silence."); }
+             }
+             throw new Error(`Agent stuck in silence (empty final responses) after ${maxEmptyResponseNudges} nudges.`);
            }
 
            // [COMPLETION GUARD] Specialist agents MUST save their deliverables
@@ -1446,6 +1582,7 @@ export class VLLMProvider extends LLMProvider {
 
   /**
    * [목적] 추출된 요약을 활용해 대화 기록을 압축.
+   * staged 목록 표시 개수는 설정 contextCompressionMaxStagedFiles 사용 (행위 상한과 분리).
    */
   compressHistory(messages, agentName = 'generic', targetDir = '.') {
     const threshold = dokodemodoorConfig.dokodemodoor.contextCompressionThreshold || 50000;
@@ -1458,9 +1595,15 @@ export class VLLMProvider extends LLMProvider {
     const window = isExploit ? 30 : (dokodemodoorConfig.dokodemodoor.contextCompressionWindow || 15);
     const initial = messages[0];
     const recent = messages.slice(-window);
+    const cap = Math.max(1, dokodemodoorConfig.dokodemodoor.contextCompressionMaxStagedFiles ?? 20);
+    const shown = findings.stagedFiles.slice(0, cap);
+    const more = findings.stagedFiles.length > cap ? ` (and ${findings.stagedFiles.length - cap} more)` : '';
+    const stagedList = shown.length > 0
+      ? `\n- Long-term memory (findings): ${shown.join(', ')}${more} — re-open via open_file if you need to recall content.`
+      : '';
     const marker = {
       role: 'user',
-      content: `[HISTORY COMPRESSED]\n\n**STATUS:**\n- Completed: ${Array.from(findings.doneTasks).join(', ')}\n- Staged: ${findings.stagedFiles.length} files\n- Todo:\n${findings.lastTodo}\n\nContinue from the latest state.`
+      content: `[HISTORY COMPRESSED]\n\n**STATUS:**\n- Completed: ${Array.from(findings.doneTasks).join(', ')}\n- Staged: ${findings.stagedFiles.length} files${stagedList}\n- Todo:\n${findings.lastTodo}\n\nContinue from the latest state.`
     };
 
     messages.length = 0;

@@ -83,6 +83,9 @@ export const config = {
       temperature: parseFloat(process.env.VLLM_TEMPERATURE, 0.7),
       maxTurns: parseInt(process.env.VLLM_MAX_TURNS, 100),
       maxPromptChars: parseIntDecimal(process.env.VLLM_MAX_PROMPT_CHARS, 32000),
+      /** Model context size in tokens. Used to cap max_tokens so prompt + completion never exceeds it (avoids 400 "max_tokens must be at least 1, got -N"). */
+      maxContextTokens: parseIntDecimal(process.env.VLLM_MAX_CONTEXT_TOKENS, 32768),
+      timeoutMs: parseIntDecimal(process.env.VLLM_TIMEOUT_MS, 900000), // 15 minutes
       promptTokenPrice: parseFloat(process.env.VLLM_PROMPT_TOKEN_PRICE, 0.0), // USD per 1M tokens
       completionTokenPrice: parseFloat(process.env.VLLM_COMPLETION_TOKEN_PRICE, 0.0) // USD per 1M tokens
     }
@@ -106,6 +109,21 @@ export const config = {
     subAgentMaxTurns: parseIntDecimal(process.env.DOKODEMODOOR_SUB_AGENT_MAX_TURNS, 50),
     externalTestDomain: process.env.EXTERNAL_TEST_DOMAIN || 'http://attacker-controlled.com',
 
+    // Safety valves (optional)
+    // - preReconHardMaxTurns: upper bound for pre-recon agent turns to prevent runaway runs
+    // - vllmEmptyResponseMaxNudges: how many times to nudge when the model returns an empty final response
+    // - retryMaxTurnsRatio: on retry (attempt >= 2), maxTurns = floor(original * ratio). 0.5 = half turns on retry.
+    preReconHardMaxTurns: parseIntDecimal(process.env.DOKODEMODOOR_PRERECON_HARD_MAX_TURNS, null),
+    vllmEmptyResponseMaxNudges: parseIntDecimal(process.env.DOKODEMODOOR_VLLM_EMPTY_RESPONSE_MAX_NUDGES, 4),
+    retryMaxTurnsRatio: (() => {
+      const raw = process.env.DOKODEMODOOR_RETRY_MAX_TURNS_RATIO;
+      if (raw === undefined || raw === '') return 0.5;
+      const v = parseFloat(raw);
+      if (!Number.isFinite(v) || v < 0) return 0.5;
+      if (v === 0) return 0.5; // 0 = keep original (treat as no limit); avoid 0 to prevent 0 turns
+      return Math.min(1, Math.max(0.25, v));
+    })(),
+
     // Agent-specific overrides (optional)
     agentMaxTurns: {
       'osv-analysis': parseIntDecimal(process.env.DOKODEMODOOR_OSV_MAX_TURNS, null),
@@ -118,6 +136,7 @@ export const config = {
 
     contextCompressionThreshold: parseIntDecimal(process.env.DOKODEMODOOR_CONTEXT_COMPRESSION_THRESHOLD, 30000),
     contextCompressionWindow: parseIntDecimal(process.env.DOKODEMODOOR_CONTEXT_COMPRESSION_WINDOW, 15),
+    contextCompressionMaxStagedFiles: parseIntDecimal(process.env.DOKODEMODOOR_CONTEXT_COMPRESSION_MAX_STAGED_FILES, 20),
     agentDebugLog: parseBoolean(process.env.DOKODEMODOOR_AGENT_DEBUG_LOG, false),
 
     // Pipeline control
