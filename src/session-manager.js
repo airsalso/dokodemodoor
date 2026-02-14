@@ -432,7 +432,6 @@ const saveSessions = async (store) => {
  *
  * [호출자]
  * - createSession() 내부 (락 보유 상태에서 호출)
- * - findExistingSession() 래퍼
  *
  * @param {object} store - 로드된 세션 스토어
  * @param {string} webUrl
@@ -458,11 +457,6 @@ const _findExistingSessionFromStore = (store, webUrl, targetRepo) => {
   if (activeSessions.length === 0) return null;
 
   return activeSessions.sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity))[0];
-};
-
-const findExistingSession = async (webUrl, targetRepo) => {
-  const store = await loadSessions();
-  return _findExistingSessionFromStore(store, webUrl, targetRepo);
 };
 
 // Generate session ID as unique UUID
@@ -821,12 +815,14 @@ export const selectSession = async () => {
   // Display session options
   console.log(chalk.cyan('\nMultiple pentest sessions found:\n'));
 
+  const pipelineAgents = new Set(Object.values(PHASES).flat());
+
   sessions.forEach((session, index) => {
     const completedCount = new Set([
       ...(session.completedAgents || []),
       ...(session.skippedAgents || [])
-    ]).size;
-    const totalAgents = Object.keys(AGENTS).length;
+    ].filter(name => pipelineAgents.has(name))).size;
+    const totalAgents = pipelineAgents.size;
     const timeAgo = getTimeAgo(session.lastActivity);
 
     // Use dynamic status calculation instead of stored status
@@ -1309,7 +1305,7 @@ export const getSessionStatus = (session) => {
  */
 export const calculateVulnerabilityAnalysisSummary = (session) => {
   const vulnAgents = PHASES['vulnerability-analysis'];
-  const completedVulnAgents = session.completedAgents.filter(agent => vulnAgents.includes(agent));
+  const completedVulnAgents = (session.completedAgents || []).filter(agent => vulnAgents.includes(agent));
 
   // NOTE: Actual vulnerability counts require reading queue files
   // This summary only shows completion counts
@@ -1383,12 +1379,13 @@ export const rollbackToAgent = async (sessionId, targetAgent) => {
 
   validateAgent(targetAgent);
 
-  if (!session.checkpoints[targetAgent]) {
+  const checkpoints = session.checkpoints || {};
+  if (!checkpoints[targetAgent]) {
     throw new PentestError(
       `No checkpoint found for agent '${targetAgent}' in session history`,
       'validation',
       false,
-      { targetAgent, availableCheckpoints: Object.keys(session.checkpoints) }
+      { targetAgent, availableCheckpoints: Object.keys(checkpoints) }
     );
   }
 
@@ -1399,10 +1396,10 @@ export const rollbackToAgent = async (sessionId, targetAgent) => {
     .map(agent => agent.name);
 
   const updates = {
-    completedAgents: session.completedAgents.filter(agent => !agentsToRemove.includes(agent)),
-    failedAgents: session.failedAgents.filter(agent => !agentsToRemove.includes(agent)),
+    completedAgents: (session.completedAgents || []).filter(agent => !agentsToRemove.includes(agent)),
+    failedAgents: (session.failedAgents || []).filter(agent => !agentsToRemove.includes(agent)),
     checkpoints: Object.fromEntries(
-      Object.entries(session.checkpoints).filter(([agent]) => !agentsToRemove.includes(agent))
+      Object.entries(checkpoints).filter(([agent]) => !agentsToRemove.includes(agent))
     )
   };
 

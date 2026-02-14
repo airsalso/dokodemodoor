@@ -137,7 +137,21 @@ export class FileLock {
   async _isStale() {
     try {
       const content = await readFile(this.lockPath, 'utf8');
-      const lockInfo = JSON.parse(content);
+
+      // 빈 파일 또는 불완전한 내용 — 다른 프로세스가 아직 쓰기 중일 수 있음
+      // 즉시 stale로 판단하지 않고 false를 반환하여 재시도 루프로 대기
+      if (!content || content.trim().length === 0) {
+        return false;
+      }
+
+      let lockInfo;
+      try {
+        lockInfo = JSON.parse(content);
+      } catch {
+        // JSON 파싱 실패 — 쓰기 진행 중 (partial write)으로 간주
+        // stale이 아닌 "사용 중"으로 처리하여 재시도 대기
+        return false;
+      }
 
       // 시간 기반 stale 판단
       if (Date.now() - lockInfo.time > this.staleMs) {
@@ -151,7 +165,7 @@ export class FileLock {
 
       return false;
     } catch {
-      // 락 파일을 읽거나 파싱할 수 없으면 stale로 간주
+      // 락 파일 자체를 읽을 수 없으면 (ENOENT 등) stale로 간주
       return true;
     }
   }

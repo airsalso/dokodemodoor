@@ -38,7 +38,7 @@ export function showHelp() {
 
   console.log(chalk.yellow.bold('DEVELOPER COMMANDS:'));
   console.log('  --run-phase          Run all agents in a phase (parallel execution for 5x speedup)');
-  console.log('  --run-all            Run all remaining agents to completion (parallel execution)');
+  console.log('  --run-all            Run all remaining agents to completion (sequential execution)');
   console.log('  --rollback-to        Rollback to agent checkpoint and invalidate all subsequent agents');
   console.log('  --rerun              Rerun specific agent in isolation (does NOT affect other agents)');
   console.log('  --status             Show current session status and progress');
@@ -67,7 +67,7 @@ export function showHelp() {
   console.log('  • Developer mode requires existing pentest session\n');
 
   console.log(chalk.yellow.bold('ENVIRONMENT VARIABLES:'));
-  console.log('  PENTEST_MAX_RETRIES    Number of retries for AI agents (default: 3)');
+  console.log('  See .env.example for full list of configuration variables');
 }
 
 // Export the splash screen function for use in main

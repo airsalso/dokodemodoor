@@ -1408,18 +1408,33 @@ export const rollbackTo = async (targetAgent, session) => {
   console.log(chalk.yellow(`🔄 Rolling back to agent: ${targetAgent}`));
 
   await validateTargetRepo(session.targetRepo);
-  validateAgent(targetAgent);
+  const agent = validateAgent(targetAgent);
 
-  if (!session.checkpoints[targetAgent]) {
+  // 병렬 phase 에이전트에 대한 rollback-to는 의미가 모호함 (skipGit 모드에서 개별 커밋 없음)
+  const PARALLEL_PHASES = ['vulnerability-analysis', 'exploitation'];
+  if (PARALLEL_PHASES.includes(agent.phase)) {
+    console.log(chalk.yellow(`\n    ⚠️  '${targetAgent}'은(는) 병렬 실행 phase(${agent.phase})의 에이전트입니다.`));
+    console.log(chalk.yellow(`    병렬 에이전트는 개별 Git 체크포인트가 없어 정확한 rollback이 불가능합니다.`));
+    console.log(chalk.yellow(`    대신 --rerun ${targetAgent} 을 사용하여 해당 에이전트만 재실행하세요.\n`));
+    throw new PentestError(
+      `Cannot rollback to parallel-phase agent '${targetAgent}'. Use --rerun instead.`,
+      'validation',
+      false,
+      { targetAgent, phase: agent.phase, suggestion: `--rerun ${targetAgent}` }
+    );
+  }
+
+  const checkpoints = session.checkpoints || {};
+  if (!checkpoints[targetAgent]) {
     throw new PentestError(
       `No checkpoint found for agent '${targetAgent}' in session history`,
       'validation',
       false,
-      { targetAgent, availableCheckpoints: Object.keys(session.checkpoints) }
+      { targetAgent, availableCheckpoints: Object.keys(checkpoints) }
     );
   }
 
-  const commitHash = session.checkpoints[targetAgent];
+  const commitHash = checkpoints[targetAgent];
 
   // Rollback git workspace
   await rollbackGitToCommit(session.targetRepo, commitHash);

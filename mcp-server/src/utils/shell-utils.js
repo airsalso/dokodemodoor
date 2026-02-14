@@ -32,12 +32,35 @@ export function isRgAvailable() {
 
 /**
  * [목적] 경로가 타겟 디렉토리(Sandbox) 내부에 있는지 검증 및 강제.
+ *
+ * 보안 주의:
+ * - prefix 비교만으로는 /repo vs /repo2 같은 형제 디렉터리 접근을 허용할 수 있음
+ * - 따라서 정확한 일치 또는 path.sep 포함 prefix를 검사
+ * - symlink를 통한 탈출을 방지하기 위해 realpath 기반으로 정규화
  */
 export function ensureInSandbox(p, targetDir) {
-  const targetAbs = path.resolve(targetDir);
-  const requestedAbs = path.resolve(p);
+  // realpath: symlink를 해소하여 실제 경로로 정규화 (탈출 방지)
+  let targetAbs;
+  try {
+    targetAbs = fs.realpathSync(path.resolve(targetDir));
+  } catch {
+    targetAbs = path.resolve(targetDir);
+  }
 
-  if (!requestedAbs.startsWith(targetAbs)) {
+  let requestedAbs;
+  try {
+    // 존재하는 경로는 realpath로 symlink 해소
+    requestedAbs = fs.realpathSync(path.resolve(p));
+  } catch {
+    // 아직 존재하지 않는 경로(새 파일 생성 등) — resolve로 정규화 후 검사
+    requestedAbs = path.resolve(p);
+  }
+
+  // 정확한 일치(디렉토리 자체) 또는 하위 경로(path.sep 포함) 검사
+  const isInSandbox = requestedAbs === targetAbs ||
+                      requestedAbs.startsWith(targetAbs + path.sep);
+
+  if (!isInSandbox) {
     console.error(chalk.red(`[SECURITY] Blocked out-of-sandbox access: ${p}`));
     throw new Error(`Permission Denied: Access outside project root is not allowed.`);
   }

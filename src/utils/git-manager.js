@@ -232,6 +232,9 @@ export const createGitCheckpoint = async (sourceDir, description, attempt) => {
     const hasChanges = status.stdout.trim().length > 0;
 
     // Stage changes with retry logic
+    // ⚠️ 알려진 리스크: git add -A는 deliverables/outputs 외에 소스 코드 변경도 스테이징함.
+    // 순차 에이전트에서만 호출되므로(병렬 phase는 skipGit) 오염 위험은 낮으나,
+    // 향후 allowlist 기반(git add -- deliverables/ outputs/)으로 전환 검토 필요.
     await executeGitCommandWithRetry(['git', 'add', '-A'], sourceDir, 'staging changes');
 
     // Create commit with retry logic
@@ -272,7 +275,8 @@ export const commitGitSuccess = async (sourceDir, description) => {
     const status = await executeGitCommandWithRetry(['git', 'status', '--porcelain'], sourceDir, 'status check for success commit');
     const changes = status.stdout.trim().split('\n').filter(line => line.length > 0);
 
-    // Stage changes with retry logic
+    // Stage changes with retry logic (순차 에이전트 전용 — 병렬 phase는 skipGit 모드)
+    // ⚠️ git add -A 범위 리스크에 대해서는 createGitCheckpoint 주석 참조
     await executeGitCommandWithRetry(['git', 'add', '-A'], sourceDir, 'staging changes for success commit');
 
     // Create success commit with retry logic
@@ -382,6 +386,12 @@ export const cleanAgentDeliverables = async (sourceDir, agentName) => {
   const deliverablesDir = path.join(sourceDir, 'deliverables');
   const deletedFiles = [];
 
+  // 병렬 에이전트(vuln/exploit)만 처리 — 그 외 에이전트는 대상 파일이 없음
+  if (!agentName.endsWith('-vuln') && !agentName.endsWith('-exploit')) {
+    console.log(chalk.gray(`    ℹ️  Skipping deliverable cleanup for non-parallel agent: ${agentName}`));
+    return { success: true, deletedFiles };
+  }
+
   try {
     if (!await fs.pathExists(deliverablesDir)) {
       return { success: true, deletedFiles };
@@ -393,15 +403,15 @@ export const cleanAgentDeliverables = async (sourceDir, agentName) => {
     const isExploit = agentName.endsWith('-exploit');
 
     // 최종 산출물 파일 패턴 (A) - 삭제 대상
+    // 파일명은 DELIVERABLE_FILENAMES (mcp-server/src/types/deliverables.js) 및
+    // VULN_TYPE_CONFIG (src/queue-validation.js) 매핑 기준
     const patterns = isExploit
       ? [
-          `${vulnType}_exploitation_evidence.json`,
-          `${vulnType}_exploitation_evidence.md`,
+          `${vulnType}_exploitation_evidence.json`,   // DELIVERABLE_FILENAMES.*_EVIDENCE
         ]
       : [
-          `${vulnType}_exploitation_queue.json`,
-          `${vulnType}_vuln_deliverable.md`,
-          `${vulnType}_vulnerability_report.md`,
+          `${vulnType}_analysis_deliverable.md`,      // VULN_TYPE_CONFIG.deliverable
+          `${vulnType}_exploitation_queue.json`,       // VULN_TYPE_CONFIG.queue
         ];
 
     for (const pattern of patterns) {
@@ -458,6 +468,7 @@ export const commitPhaseResults = async (sourceDir, phaseName) => {
     );
     const changes = status.stdout.trim().split('\n').filter(line => line.length > 0);
 
+    // ⚠️ git add -A: 병렬 phase 완료 후 전체 산출물 커밋 — createGitCheckpoint 주석 참조
     await executeGitCommandWithRetry(
       ['git', 'add', '-A'], sourceDir, 'staging phase results'
     );

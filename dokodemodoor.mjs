@@ -89,18 +89,16 @@ const cleanupSession = async () => {
 
   try {
     const session = await getSession(activeSessionId);
-    if (session) {
-      const runningAgents = session.runningAgents || [];
-      const failedAgents = new Set([...(session.failedAgents || []), ...runningAgents]);
-      await updateSession(activeSessionId, {
-        status: 'interrupted',
-        lastActivity: getLocalISOString(),
-        runningAgents: [],
-        failedAgents: Array.from(failedAgents)
-      });
-    } else {
-      await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
-    }
+    if (!session) return; // 세션이 존재하지 않으면 정리 불필요
+
+    const runningAgents = session.runningAgents || [];
+    const failedAgents = new Set([...(session.failedAgents || []), ...runningAgents]);
+    await updateSession(activeSessionId, {
+      status: 'interrupted',
+      lastActivity: getLocalISOString(),
+      runningAgents: [],
+      failedAgents: Array.from(failedAgents)
+    });
     console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as interrupted`));
   } catch (e) {
     // Ignore errors during exit cleanup
@@ -259,15 +257,20 @@ async function main(webUrl, repoPath, { configPath = null, disableLoader = false
     const consoleLogPath = path.join(auditPath, 'console.log');
     consoleLogStream = fs.createWriteStream(consoleLogPath, { flags: 'a' });
 
+    // 스트림 에러 시 조용히 로깅 비활성화 (디스크 풀 등에서 프로세스 크래시 방지)
+    consoleLogStream.on('error', () => {
+      consoleLogStream = null;
+    });
+
     origStdoutWrite = process.stdout.write.bind(process.stdout);
     origStderrWrite = process.stderr.write.bind(process.stderr);
 
     process.stdout.write = (chunk, encoding, callback) => {
-      consoleLogStream.write(chunk);
+      try { if (consoleLogStream) consoleLogStream.write(chunk); } catch { /* ignore */ }
       return origStdoutWrite(chunk, encoding, callback);
     };
     process.stderr.write = (chunk, encoding, callback) => {
-      consoleLogStream.write(chunk);
+      try { if (consoleLogStream) consoleLogStream.write(chunk); } catch { /* ignore */ }
       return origStderrWrite(chunk, encoding, callback);
     };
 
