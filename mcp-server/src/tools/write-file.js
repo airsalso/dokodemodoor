@@ -7,7 +7,7 @@ import { createToolResult } from '../types/tool-responses.js';
 import { getTargetDir } from '../../../src/utils/context.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import path from 'path';
-import { ensureInSandbox } from '../utils/shell-utils.js';
+import { recoverPath, ensureInSandbox } from '../utils/shell-utils.js';
 
 export const WriteFileInputSchema = z.object({
   path: z.string().describe('Target file path'),
@@ -21,8 +21,9 @@ export async function writeFile(args) {
     let filePath = args.path;
     const workDir = args.cwd ? path.resolve(targetDir, args.cwd) : targetDir;
 
-    // 1. Mandatory Sandbox Enforcement
+    // 1. Recover path (LLM 오타/환각 보정) + Mandatory Sandbox Enforcement
     let fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(workDir, filePath);
+    fullPath = await recoverPath(fullPath, targetDir);
     fullPath = ensureInSandbox(fullPath, targetDir);
 
     // 2. Atomic Directory Preparation

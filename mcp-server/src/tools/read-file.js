@@ -23,10 +23,11 @@ export const ReadFileInputSchema = z.object({
 export async function readFile(args) {
   try {
     const targetDir = getTargetDir();
-    let filePath = args.path;
+    let filePath = args.path || '';
     const workDir = args.cwd ? path.resolve(targetDir, args.cwd) : targetDir;
 
     // 1. Recover Path (Now includes README logic in shell-utils)
+    // 빈 문자열/상대경로/오타 절대경로 모두 recoverPath에서 보정
     filePath = await recoverPath(filePath, targetDir);
 
     // 2. Sandbox Gate
@@ -39,12 +40,11 @@ export async function readFile(args) {
     // Parity: If it's a directory, return a listing instead of erroring with cat
     if (statSync(filePath).isDirectory()) {
        const { stdout } = await execAsync(`ls -la ${shQuote(filePath)}`, { cwd: workDir });
-       return createToolResult({
-         status: 'success',
-         message: 'Target is a directory. Showing list instead.',
-         content: stdout,
-         path: path.relative(targetDir, filePath)
-       });
+       const relPath = path.relative(targetDir, filePath);
+       return {
+         content: [{ type: 'text', text: `DIR: ${relPath}\n\n${stdout}` }],
+         isError: false
+       };
     }
 
     // 3. Content Extraction
@@ -60,11 +60,11 @@ export async function readFile(args) {
 
     const { stdout } = await execAsync(cmd, { cwd: workDir });
 
-    return createToolResult({
-      status: 'success',
-      content: stdout,
-      path: path.relative(targetDir, filePath)
-    });
+    const relPath = path.relative(targetDir, filePath);
+    return {
+      content: [{ type: 'text', text: `FILE: ${relPath}\n\n${stdout}` }],
+      isError: false
+    };
 
   } catch (error) {
     return createToolResult({

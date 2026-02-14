@@ -8,7 +8,7 @@ import { getTargetDir } from '../../../src/utils/context.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
-import { shQuote, isRgAvailable, ensureInSandbox } from '../utils/shell-utils.js';
+import { shQuote, isRgAvailable, recoverPath, ensureInSandbox } from '../utils/shell-utils.js';
 
 const execAsync = promisify(exec);
 
@@ -34,8 +34,9 @@ export async function searchFiles(args) {
     const maxResults = args.max_results || 100;
     const workDir = args.cwd ? path.resolve(targetDir, args.cwd) : targetDir;
 
-    // 1. Sandbox Verification
+    // 1. Recover path (LLM 오타/환각 보정) + Sandbox Verification
     let searchPath = path.isAbsolute(inputPath) ? inputPath : path.resolve(workDir, inputPath);
+    searchPath = await recoverPath(searchPath, targetDir);
     searchPath = ensureInSandbox(searchPath, targetDir);
 
     // 2. Optimized Query Logic
@@ -76,15 +77,16 @@ export async function searchFiles(args) {
 
     const { stdout } = await execAsync(cmd, { cwd: workDir });
 
-    return createToolResult({
-      status: 'success',
-      content: stdout || '(No matches found)',
-      count: stdout.split('\n').filter(Boolean).length
-    });
+    const out = stdout || '(No matches found)';
+    const count = stdout ? stdout.split('\n').filter(Boolean).length : 0;
+    return {
+      content: [{ type: 'text', text: `MATCHES: ${count}\n\n${out}` }],
+      isError: false
+    };
 
   } catch (error) {
     if (error.code === 1 && !error.stdout) {
-       return createToolResult({ status: 'success', content: '(No matches found)', count: 0 });
+      return { content: [{ type: 'text', text: 'MATCHES: 0\n\n(No matches found)' }], isError: false };
     }
     return createToolResult({
       status: 'error',

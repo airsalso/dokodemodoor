@@ -1,3 +1,5 @@
+- **Do not call open_file or search_file again for a path/query you have already checked. Use your prior turn summary.**
+- **The file-open ({{FILE_OPEN_CAP}}) / search ({{SEARCH_CAP}}) cap for this run is enforced at runtime. When you receive 'Cap reached', immediately call save_deliverable and finish.**
 - TaskAgent: max **2 times per (endpoint + parameter + sink/client)**
 - **NO-DUPLICATION**: Do not search for the same keyword or Sink in the same directory more than twice. Check your history before searching.
 - After 3 failed attempts to locate a pattern → mark **not found in production** and move on

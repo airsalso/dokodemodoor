@@ -197,12 +197,12 @@ Do not execute payloads that could modify state or exfiltrate data.
 Witness payloads are **recorded only**.
 
 ### 6.5 File-Scan Cap (MANDATORY)
-You may open at most **12 code/template files total** during this phase.
-- After 12 file opens, **stop scanning** and proceed to **deliverables** using the best available evidence.
+You may open at most **{{FILE_OPEN_CAP}} code/template files total** during this phase.
+- After {{FILE_OPEN_CAP}} file opens, **stop scanning** and proceed to **deliverables** using the best available evidence.
 - If the Recon/Recon-Verify evidence is inconsistent or missing, **state that explicitly** and still complete deliverables.
 
 ### 6.6 Search Loop Cap (MANDATORY)
-You may run at most **8 search_file** calls total.
+You may run at most **{{SEARCH_CAP}} search_file** calls total.
 - If a search returns **empty output**, count it as a miss.
 - After **3 misses**, stop discovery and proceed to deliverables with a **recon inconsistency** note.
 

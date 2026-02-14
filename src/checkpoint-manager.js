@@ -5,6 +5,7 @@ import { loadConfig } from './config/config-loader.js';
 import { executeGitCommandWithRetry, preserveDeliverables } from './utils/git-manager.js';
 import { getLocalISOString } from './utils/time-utils.js';
 import { formatDuration, DOKODEMODOOR_ROOT } from './audit/utils.js';
+import { ensureScopeSizeAndCaps } from './utils/scope-caps.js';
 import {
   AGENTS,
   PHASES,
@@ -340,6 +341,7 @@ const rollbackGitToCommit = async (targetRepo, commitHash) => {
  * - skipWorkspaceClean (boolean)
  * - queueData (object|null)
  * - skipGit (boolean) - true이면 Git 체크포인트/커밋/롤백 생략 (병렬 phase용)
+ * - caps (object|null) - { fileOpenCap, searchCap } 페이즈별 동적 상한 (선택)
  *
  * [반환값]
  * - Promise<object>
@@ -350,7 +352,7 @@ const rollbackGitToCommit = async (targetRepo, commitHash) => {
  * [에러 처리]
  * - 검증/실행 실패 시 PentestError 발생
  */
-const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadPrompt, allowRerun = false, skipWorkspaceClean = false, queueData = null, skipGit = false) => {
+const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadPrompt, allowRerun = false, skipWorkspaceClean = false, queueData = null, skipGit = false, caps = null) => {
   // Validate agent first
   const agent = validateAgent(agentName);
 
@@ -446,6 +448,12 @@ const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadP
     variables.queueSummary = JSON.stringify(queueData, null, 2);
   }
 
+  // 동적 상한: caps가 있으면 프롬프트 변수에 주입 ({{FILE_OPEN_CAP}}, {{SEARCH_CAP}})
+  if (caps && typeof caps.fileOpenCap === 'number' && typeof caps.searchCap === 'number') {
+    variables.FILE_OPEN_CAP = String(caps.fileOpenCap);
+    variables.SEARCH_CAP = String(caps.searchCap);
+  }
+
   // Handle relative config paths - prepend configs/ if needed
   let distributedConfig = null;
   if (session.configFile) {
@@ -493,7 +501,8 @@ const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadP
         variables,
         config,
         toolAvailability,
-        session.id
+        session.id,
+        caps
       );
 
       const commitHash = await getGitCommitHash(targetRepo);
@@ -629,7 +638,7 @@ const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadP
       agentName,  // Pass agent name for snapshot creation
       getAgentColor(agentName),  // Pass color function for this agent
       { id: session.id, webUrl: session.webUrl, repoPath: session.repoPath },  // Session metadata for audit logging
-      { skipGit }  // 병렬 phase에서는 git 비활성화
+      { skipGit, caps }  // 병렬 phase에서는 git 비활성화; caps는 페이즈별 동적 상한
     );
 
     if (!result.success) {
@@ -805,7 +814,7 @@ const runAgentRange = async (startAgent, endAgent, session, runAgentPromptWithRe
     }
 
     try {
-      await runSingleAgent(agent.name, session, runAgentPromptWithRetry, loadPrompt);
+      await runSingleAgent(agent.name, session, runAgentPromptWithRetry, loadPrompt, false, false, null, false, null);
     } catch (error) {
       console.log(chalk.red(`❌ Agent range execution stopped at '${agent.name}' due to failure`));
       throw error;
@@ -854,6 +863,11 @@ const runParallelVuln = async (session, runAgentPromptWithRetry, loadPrompt) => 
   const { config } = await import('./config/env.js');
   const parallelLimit = config.dokodemodoor.parallelLimit || 5;
 
+  const phaseCaps = await ensureScopeSizeAndCaps(currentSession, 'vulnerability-analysis');
+  if (phaseCaps) {
+    console.log(chalk.gray(`    📐 Scope caps: fileOpen=${phaseCaps.fileOpenCap}, search=${phaseCaps.searchCap}`));
+  }
+
   // Use semaphore-based pool: as soon as one agent finishes, the next starts.
   // Unlike chunk-based execution, a slow agent does not block other slots.
   const { Semaphore } = await import('./utils/concurrency.js');
@@ -862,7 +876,7 @@ const runParallelVuln = async (session, runAgentPromptWithRetry, loadPrompt) => 
 
   const results = await sem.map(activeAgents, async (agentName) => {
     console.log(chalk.gray(`    ▶ Starting: ${agentName}`));
-    const result = await runSingleAgent(agentName, currentSession, runAgentPromptWithRetry, loadPrompt, false, true, null, true);
+    const result = await runSingleAgent(agentName, currentSession, runAgentPromptWithRetry, loadPrompt, false, true, null, true, phaseCaps);
     console.log(chalk.gray(`    ◀ Finished: ${agentName}`));
     return { agentName, ...result, attempts: 1 };
   });
@@ -1058,7 +1072,7 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
     }
 
     console.log(chalk.gray(`    ▶ Starting: ${agentName}`));
-    const result = await runSingleAgent(agentName, freshSession, runAgentPromptWithRetry, loadPrompt, false, true, queueData, true);
+    const result = await runSingleAgent(agentName, freshSession, runAgentPromptWithRetry, loadPrompt, false, true, queueData, true, null);
     console.log(chalk.gray(`    ◀ Finished: ${agentName}`));
     return { agentName, ...result, attempts: result.attempts || 1 };
   });
@@ -1339,13 +1353,20 @@ export const runPhase = async (phaseName, session, runAgentPromptWithRetry, load
 
   // For other phases (pre-reconnaissance, reconnaissance, reporting), run agents sequentially
   const agents = validatePhase(phaseName);
+  let phaseCaps = null;
+  if (phaseName === 'pre-reconnaissance' || phaseName === 'reconnaissance') {
+    phaseCaps = await ensureScopeSizeAndCaps(currentSession, phaseName);
+    if (phaseCaps) {
+      console.log(chalk.gray(`📐 Scope caps for ${phaseName}: fileOpen=${phaseCaps.fileOpenCap}, search=${phaseCaps.searchCap}`));
+    }
+  }
   const results = [];
   for (const agent of agents) {
     if (currentSession.completedAgents.includes(agent.name)) {
       console.log(chalk.gray(`⏭️  Agent '${agent.name}' already completed, skipping`));
       continue;
     }
-    const result = await runSingleAgent(agent.name, currentSession, runAgentPromptWithRetry, loadPrompt);
+    const result = await runSingleAgent(agent.name, currentSession, runAgentPromptWithRetry, loadPrompt, false, false, null, false, phaseCaps);
     results.push(result);
   }
   console.log(chalk.green(`✅ Phase '${phaseName}' completed successfully`));
@@ -1556,7 +1577,7 @@ export const rerunAgent = async (agentName, session, runAgentPromptWithRetry, lo
   // Run the target agent (allow rerun since we've explicitly prepared for it)
   // 병렬 에이전트는 skipGit=true로 실행
   const skipGit = isParallelAgent && !cascade;
-  await runSingleAgent(agentName, session, runAgentPromptWithRetry, loadPrompt, true, false, null, skipGit);
+  await runSingleAgent(agentName, session, runAgentPromptWithRetry, loadPrompt, true, false, null, skipGit, null);
 
   console.log(chalk.green(`✅ Agent '${agentName}' rerun completed successfully`));
 
@@ -1611,7 +1632,7 @@ export const runAll = async (session, runAgentPromptWithRetry, loadPrompt) => {
 
   // Run each remaining agent in sequence
   for (const agentName of remainingAgents) {
-    await runSingleAgent(agentName, session, runAgentPromptWithRetry, loadPrompt);
+    await runSingleAgent(agentName, session, runAgentPromptWithRetry, loadPrompt, false, false, null, false, null);
   }
 
   console.log(chalk.green(`\n🎉 All agents completed successfully! Session marked as completed.`));

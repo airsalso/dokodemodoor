@@ -289,6 +289,7 @@ async function validateAgentOutput(result, agentName, sourceDir, auditSession) {
  * - sessionMetadata (object|null)
  * - auditSession (object|null)
  * - attemptNumber (number)
+ * - options (object) - { caps: { fileOpenCap, searchCap } } 페이즈별 동적 상한
  *
  * [반환값]
  * - Promise<object>
@@ -296,7 +297,7 @@ async function validateAgentOutput(result, agentName, sourceDir, auditSession) {
  * [부작용]
  * - MCP 서버 실행, 로그 기록, 도구 호출 수행
  */
-async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context = '', description = 'Agent analysis', agentName = null, colorFn = chalk.cyan, sessionMetadata = null, auditSession = null, attemptNumber = 1) {
+async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context = '', description = 'Agent analysis', agentName = null, colorFn = chalk.cyan, sessionMetadata = null, auditSession = null, attemptNumber = 1, options = {}) {
   // Use global envConfig as base
   let config = { ...envConfig };
 
@@ -376,12 +377,41 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
     // Provider-specific setup
     let queryOptions = {
       cwd: sourceDir,
-      maxTurns: (agentName && config.dokodemodoor.agentMaxTurns[agentName])
-                  || config.llm.vllm.maxTurns
+      maxTurns: (agentName && config.dokodemodoor?.agentMaxTurns?.[agentName])
+                  || config.llm?.vllm?.maxTurns
                   || 100,
       agentName: agentName,
       parentTurnCount: null  // Will be set by TaskAgent when calling sub-agents
     };
+    if (options?.caps) {
+      queryOptions.fileOpenCap = options.caps.fileOpenCap;
+      queryOptions.searchCap = options.caps.searchCap;
+    }
+
+    // Safety clamp: pre-recon is prone to runaway run-times when maxTurns is accidentally set too high.
+    if (agentName === 'pre-recon') {
+      const configuredHardCap = config.dokodemodoor?.preReconHardMaxTurns;
+      const hardCap = (typeof configuredHardCap === 'number' && Number.isFinite(configuredHardCap) && configuredHardCap > 0)
+        ? configuredHardCap
+        : (config.llm?.vllm?.maxTurns || null);
+
+      if (typeof hardCap === 'number' && hardCap > 0 && queryOptions.maxTurns > hardCap) {
+        console.log(chalk.gray(`    pre-recon maxTurns clamped: ${queryOptions.maxTurns} -> ${hardCap} (DOKODEMODOOR_PRERECON_HARD_MAX_TURNS)`));
+        queryOptions.maxTurns = hardCap;
+      }
+    }
+
+    // 재시도 시 max_turns 비율 적용 (검증 실패 후 재실행 비용 절감)
+    if (attemptNumber >= 2) {
+      const ratio = config.dokodemodoor?.retryMaxTurnsRatio;
+      if (typeof ratio === 'number' && ratio > 0 && ratio < 1) {
+        const reduced = Math.max(1, Math.floor(queryOptions.maxTurns * ratio));
+        if (reduced < queryOptions.maxTurns) {
+          console.log(chalk.gray(`    retry maxTurns reduced: ${queryOptions.maxTurns} -> ${reduced} (attempt ${attemptNumber}, ratio=${ratio})`));
+          queryOptions.maxTurns = reduced;
+        }
+      }
+    }
 
     // Determine which tools this agent needs based on phase and agent-specific overrides
     let needsPlaywright = false;
@@ -501,6 +531,13 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
     try {
       // Use provider's query method
       // Wrap the entire query turn in context to isolate state
+      // RE 에이전트의 경우 binaryPath를 global context에 저장 (도구 별칭 $BINARY 지원)
+      // webUrl은 원본 바이너리 경로(/usr/bin/curl), sourceDir은 워크스페이스
+      // 워크스페이스 안의 바이너리 경로 = sourceDir + basename(webUrl)
+      if (agentName?.startsWith('re-') && sessionMetadata?.webUrl) {
+        global.__DOKODEMODOOR_BINARY_PATH = path.join(sourceDir, path.basename(sessionMetadata.webUrl));
+      }
+
       await runWithContext({
         agentName: agentName || description,
         targetDir: sourceDir,
@@ -973,7 +1010,8 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
     }
 
     try {
-      const result = await runAgentPrompt(prompt, sourceDir, allowedTools, retryContext, description, agentName, colorFn, sessionMetadata, auditSession, attempt);
+      const runOptions = { skipGit, caps: options.caps };
+      const result = await runAgentPrompt(prompt, sourceDir, allowedTools, retryContext, description, agentName, colorFn, sessionMetadata, auditSession, attempt, runOptions);
 
       // Validate output after successful run
       if (result.success) {

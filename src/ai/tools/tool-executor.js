@@ -9,6 +9,28 @@ import { toolRegistry } from './tool-registry.js';
 import chalk from 'chalk';
 import { trackToolCall } from './proxy-metrics.js';
 
+function normalizeToolResultContent(result) {
+  // Many MCP tools return { content: [{ type: 'text', text: '...json...' }], isError: boolean }.
+  // Avoid double-encoding by extracting the text payload directly when available.
+  if (typeof result === 'string') return result;
+  if (result && typeof result === 'object') {
+    const content = result.content;
+    if (Array.isArray(content)) {
+      const texts = content
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object' && typeof item.text === 'string') return item.text;
+          return null;
+        })
+        .filter((t) => typeof t === 'string');
+
+      if (texts.length > 0) return texts.join('\n');
+    }
+    return JSON.stringify(result);
+  }
+  return String(result);
+}
+
 /**
  * [목적] 단일 도구 호출 실행 및 결과 반환.
  *
@@ -89,7 +111,7 @@ export async function executeToolCalls(toolCalls, customRegistry = null) {
       tool_call_id: toolCall.id,
       role: 'tool',
       name: toolCall.name,
-      content: JSON.stringify(result)
+      content: normalizeToolResultContent(result)
     });
   }
 

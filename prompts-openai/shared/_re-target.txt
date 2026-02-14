@@ -6,4 +6,15 @@
 - **프로세스 이름**: {{PROCESS_NAME}}
 - **분석 초점**: {{ANALYSIS_FOCUS}}
 - **작업 디렉토리**: {{REPO_PATH}}
+
+### ⚠️ 경로 사용 규칙 (MANDATORY)
+**절대경로를 직접 타이핑하지 마세요.** 아래 짧은 별칭을 사용하세요:
+- `$WORK_DIR` = `{{REPO_PATH}}` (작업 디렉토리)
+- `$BINARY` = `{{BINARY_PATH}}` (바이너리 파일)
+
+모든 도구 호출에서 절대경로 대신 **상대경로** 또는 **위 별칭**을 사용하세요:
+- ✅ 올바른 예: `"path": "deliverables/re_inventory_deliverable.md"` (상대경로)
+- ✅ 올바른 예: `"path": "$WORK_DIR/deliverables/..."` (별칭)
+- ✅ 올바른 예: `"path": "$BINARY"` (별칭)
+- ❌ 잘못된 예: `"path": "/home/ubuntu/dokodemodoor/repos/re-curl/..."` (긴 절대경로 직접 입력 — 오타 위험)
 </re-target>

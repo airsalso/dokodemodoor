@@ -15,6 +15,22 @@
 
 ## 1. 시스템 요구사항 확인
 
+### 1.1 Git identity 설정 (필수)
+
+RE 스캐너는 체크포인트용으로 워크스페이스에서 `git commit`을 수행합니다. **전역 Git 사용자 정보가 없으면 체크포인트 생성이 실패**합니다. 배포 서버에서 한 번만 설정하세요.
+
+```bash
+git config --global user.email "you@example.com"
+git config --global user.name "Your Name"
+# 확인
+git config --global user.email
+git config --global user.name
+```
+
+> WSL2 등 새 환경에서는 이 단계를 반드시 수행한 뒤 RE 스캐너를 실행하세요.
+
+### 1.2 그 외 요구사항
+
 ```bash
 # Ubuntu 버전 (22.04 LTS 이상 권장)
 lsb_release -a
@@ -289,6 +305,22 @@ npm run re-scan -- "$TEST_BIN" --agent re-report --config "$CONFIG"
 # → deliverables/re_comprehensive_report.md 확인
 ```
 
+### 9.1.1 Phase 1만 빠르게 검증 (Ghidra 없이)
+
+Phase 1(Pre-Inventory)은 **re-sigcheck MCP만** 사용하므로, Ghidra·ghidra-mcp를 설치하지 않아도 됩니다. re-ghidra MCP가 실패하면 "Continuing without re-ghidra tools"로 진행되며, re-inventory는 file/readelf/diec 등으로 동작합니다.
+
+```bash
+# Git identity 설정 필수 (1.1 참고)
+git config --global user.email "you@example.com"
+git config --global user.name "Your Name"
+
+# Phase 1만 실행 (configs/binary/sample-re.yaml 등)
+npm run re-scan -- /usr/bin/curl --agent re-inventory --config configs/binary/sample-re.yaml
+# → repos/re-curl/deliverables/ 등에서 산출물 확인
+```
+
+Ghidra MCP(/opt/ghidra-mcp)가 없어도 위 명령은 성공해야 합니다. Phase 2 이상을 쓰려면 4절·5절대로 Ghidra와 ghidra-mcp를 설치하세요.
+
 ### 9.2 전체 파이프라인 E2E
 
 ```bash
@@ -309,6 +341,41 @@ npm run re-scan -- "/path/to/sample.exe" --config "$CONFIG"
 ---
 
 ## 10. 트러블슈팅
+
+### Git identity unknown / 체크포인트 생성 실패
+
+에러 예: `fatal: empty ident name (for <user@host>) not allowed`, `Author identity unknown`
+
+**원인**: 전역 Git 사용자 정보가 설정되지 않음.  
+**조치**: 1.1절대로 한 번 설정 후 재실행.
+
+```bash
+git config --global user.email "you@example.com"
+git config --global user.name "Your Name"
+```
+
+### re-ghidra MCP 실패: bridge_mcp_ghidra.py 없음
+
+에러 예: `python3: can't open file '/opt/ghidra-mcp/bridge_mcp_ghidra.py': [Errno 2] No such file or directory`
+
+**원인**: bethington/ghidra-mcp가 `/opt/ghidra-mcp`에 설치되지 않았거나, `GHIDRA_MCP_DIR`이 다른 경로인데 해당 경로에 `bridge_mcp_ghidra.py`가 없음.  
+**조치**:
+- Phase 2 이상을 쓸 때: 4절(방법 A 또는 B)대로 `/opt/ghidra-mcp`에 클론·빌드 후 `bridge_mcp_ghidra.py` 존재 확인. `.env`에 `GHIDRA_MCP_DIR=/opt/ghidra-mcp` 설정.
+- Phase 1만 쓸 때: re-ghidra는 사용하지 않으므로 이 오류는 무시해도 됨. "Continuing without re-ghidra tools" 후 re-inventory는 re-sigcheck만으로 동작.
+
+### re-sigcheck MCP 실패: McpServer export / SyntaxError
+
+에러 예: `The requested module '@anthropic-ai/claude-agent-sdk' does not provide an export named 'McpServer'`
+
+**원인**: re-sigcheck-mcp는 이제 **@modelcontextprotocol/sdk** 기반 stdio 서버를 사용합니다. 구 버전 소스나 의존성 불일치 시 발생할 수 있음.  
+**조치**: 프로젝트 최신화 후 `mcp-servers/re-sigcheck-mcp`에서 재설치.
+
+```bash
+cd mcp-servers/re-sigcheck-mcp
+npm install
+node index.js
+# (stdin 대기 후 종료해도 됨 — 에러 없으면 정상)
+```
 
 ### Ghidra MCP Plugin이 자동 로드되지 않음
 

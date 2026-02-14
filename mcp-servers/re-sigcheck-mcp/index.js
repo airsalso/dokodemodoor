@@ -6,8 +6,11 @@
  * - Windows: Sigcheck(서명 검증) + DiE(패킹/컴파일러 탐지)
  * - Linux: file + readelf + sha256sum + DiE
  * 크로스 플랫폼: PE/ELF 모두 지원.
+ *
+ * 표준 MCP 프로토콜 사용: @modelcontextprotocol/sdk (stdio 전송).
  */
-import { McpServer } from '@anthropic-ai/claude-agent-sdk';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -42,11 +45,14 @@ async function runTool(command, args, options = {}) {
   }
 }
 
-const server = new McpServer({
-  name: 're-sigcheck',
-  version: '1.1.0',
-  description: 'Binary pre-inventory tools: signature verification, packing/compiler detection, binary structure info (cross-platform: PE/ELF)'
-});
+function textContent(text) {
+  return { content: [{ type: 'text', text }] };
+}
+
+const server = new McpServer(
+  { name: 're-sigcheck', version: '1.1.0' },
+  { capabilities: { tools: {} } }
+);
 
 /**
  * sigcheck_analyze — 바이너리 서명 및 기본 속성 분석
@@ -56,31 +62,26 @@ const server = new McpServer({
  */
 server.tool(
   'sigcheck_analyze',
-  {
-    binary_path: z.string().describe('분석할 바이너리 파일 경로')
-  },
+  '바이너리 서명 및 기본 속성 분석 (Windows: Sigcheck, Linux: file+readelf+sha256)',
+  z.object({ binary_path: z.string().describe('분석할 바이너리 파일 경로') }),
   async ({ binary_path }) => {
     if (!existsSync(binary_path)) {
-      return { content: [{ type: 'text', text: `Error: File not found: ${binary_path}` }] };
+      return textContent(`Error: File not found: ${binary_path}`);
     }
 
     if (IS_WINDOWS) {
-      // Windows: sigcheck64.exe -nobanner -accepteula -a -h <file>
       const result = await runTool(SIGCHECK_PATH, [
         '-nobanner', '-accepteula', '-a', '-h', binary_path
       ]);
 
       if (!result.success && !result.stdout) {
-        return { content: [{ type: 'text', text: `Sigcheck failed: ${result.error}\n${result.stderr}` }] };
+        return textContent(`Sigcheck failed: ${result.error}\n${result.stderr}`);
       }
 
-      const output = result.stdout || result.stderr;
-      const parsed = parseSigcheckOutput(output, binary_path);
-
-      return { content: [{ type: 'text', text: JSON.stringify(parsed, null, 2) }] };
+      const parsed = parseSigcheckOutput(result.stdout || result.stderr, binary_path);
+      return textContent(JSON.stringify(parsed, null, 2));
     }
 
-    // Linux: file + readelf + sha256sum
     const [fileResult, readelfResult, sha256Result] = await Promise.all([
       runTool('file', ['-b', binary_path]),
       runTool('readelf', ['-h', binary_path]).catch(() => ({ success: false, stdout: '', stderr: '' })),
@@ -88,29 +89,26 @@ server.tool(
     ]);
 
     const parsed = parseLinuxBinaryInfo(fileResult, readelfResult, sha256Result, binary_path);
-
-    return { content: [{ type: 'text', text: JSON.stringify(parsed, null, 2) }] };
+    return textContent(JSON.stringify(parsed, null, 2));
   }
 );
 
 /**
  * die_scan — Detect It Easy(DiE)로 패킹/난독화/컴파일러/런타임 탐지
- * DiE CLI는 Windows/Linux 모두 지원.
  */
 server.tool(
   'die_scan',
-  {
-    binary_path: z.string().describe('분석할 바이너리 파일 경로')
-  },
+  'Detect It Easy(DiE)로 패킹/난독화/컴파일러/런타임 탐지',
+  z.object({ binary_path: z.string().describe('분석할 바이너리 파일 경로') }),
   async ({ binary_path }) => {
     if (!existsSync(binary_path)) {
-      return { content: [{ type: 'text', text: `Error: File not found: ${binary_path}` }] };
+      return textContent(`Error: File not found: ${binary_path}`);
     }
 
     const result = await runTool(DIE_PATH, ['--json', binary_path], { timeout: 120000 });
 
     if (!result.success && !result.stdout) {
-      return { content: [{ type: 'text', text: `DiE scan failed: ${result.error}\n${result.stderr}` }] };
+      return textContent(`DiE scan failed: ${result.error}\n${result.stderr}`);
     }
 
     let parsed;
@@ -120,42 +118,32 @@ server.tool(
       parsed = { raw_output: result.stdout };
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(parsed, null, 2) }] };
+    return textContent(JSON.stringify(parsed, null, 2));
   }
 );
 
 /**
  * binary_info — 바이너리 구조 상세 정보
- *
- * Windows: DiE deep scan + sigcheck fallback
- * Linux: readelf -S (섹션) + readelf -d (dynamic/shared libs) + objdump -p
  */
 server.tool(
   'binary_info',
-  {
-    binary_path: z.string().describe('분석할 바이너리 파일 경로')
-  },
+  '바이너리 구조 상세 정보 (Windows: DiE deep, Linux: readelf + DiE)',
+  z.object({ binary_path: z.string().describe('분석할 바이너리 파일 경로') }),
   async ({ binary_path }) => {
     if (!existsSync(binary_path)) {
-      return { content: [{ type: 'text', text: `Error: File not found: ${binary_path}` }] };
+      return textContent(`Error: File not found: ${binary_path}`);
     }
 
     if (IS_WINDOWS) {
-      // DiE deep scan for detailed PE info
       const result = await runTool(DIE_PATH, ['--json', '--deep', binary_path], { timeout: 120000 });
 
       if (!result.success && !result.stdout) {
         const fallback = await runTool(SIGCHECK_PATH, ['-nobanner', '-accepteula', binary_path]);
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              source: 'sigcheck_fallback',
-              raw_output: fallback.stdout || fallback.stderr || 'No output',
-              filename: basename(binary_path)
-            }, null, 2)
-          }]
-        };
+        return textContent(JSON.stringify({
+          source: 'sigcheck_fallback',
+          raw_output: fallback.stdout || fallback.stderr || 'No output',
+          filename: basename(binary_path)
+        }, null, 2));
       }
 
       let parsed;
@@ -165,15 +153,9 @@ server.tool(
         parsed = { raw_output: result.stdout };
       }
 
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ source: 'die_deep', filename: basename(binary_path), ...parsed }, null, 2)
-        }]
-      };
+      return textContent(JSON.stringify({ source: 'die_deep', filename: basename(binary_path), ...parsed }, null, 2));
     }
 
-    // Linux: readelf 기반 상세 정보
     const [sectionsResult, dynamicResult, dieResult] = await Promise.all([
       runTool('readelf', ['-S', '-W', binary_path]),
       runTool('readelf', ['-d', binary_path]).catch(() => ({ success: false, stdout: '' })),
@@ -188,7 +170,6 @@ server.tool(
       dynamic_deps: dynamicResult.success ? parseDynamicDeps(dynamicResult.stdout) : []
     };
 
-    // DiE deep 결과가 있으면 병합
     if (dieResult.success && dieResult.stdout) {
       try {
         info.die_deep = JSON.parse(dieResult.stdout);
@@ -197,7 +178,7 @@ server.tool(
       }
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }] };
+    return textContent(JSON.stringify(info, null, 2));
   }
 );
 
@@ -277,31 +258,26 @@ function parseLinuxBinaryInfo(fileResult, readelfResult, sha256Result, filePath)
     elf_entry_point: ''
   };
 
-  // file 명령 파싱
   if (fileResult.success) {
     const fileOut = fileResult.stdout;
     result.description = fileOut;
 
     if (fileOut.includes('ELF')) {
       result.format = 'ELF';
-      // 아키텍처 추출
       if (fileOut.includes('x86-64') || fileOut.includes('x86_64')) result.machine_type = 'x86_64';
       else if (fileOut.includes('80386') || fileOut.includes('Intel 80386')) result.machine_type = 'x86 (32-bit)';
       else if (fileOut.includes('ARM aarch64') || fileOut.includes('aarch64')) result.machine_type = 'aarch64';
       else if (fileOut.includes('ARM')) result.machine_type = 'ARM';
       else if (fileOut.includes('MIPS')) result.machine_type = 'MIPS';
 
-      // ELF 타입
       if (fileOut.includes('executable')) result.elf_type = 'EXEC';
       else if (fileOut.includes('shared object')) result.elf_type = 'DYN (shared object/PIE)';
       else if (fileOut.includes('relocatable')) result.elf_type = 'REL';
       else if (fileOut.includes('core file')) result.elf_type = 'CORE';
 
-      // 링커 정보
       if (fileOut.includes('statically linked')) result.product = 'statically linked';
       else if (fileOut.includes('dynamically linked')) result.product = 'dynamically linked';
 
-      // 스트립 여부
       if (fileOut.includes('not stripped')) result.file_version = 'not stripped (symbols available)';
       else if (fileOut.includes('stripped')) result.file_version = 'stripped';
     } else if (fileOut.includes('PE32+') || fileOut.includes('PE32')) {
@@ -313,7 +289,6 @@ function parseLinuxBinaryInfo(fileResult, readelfResult, sha256Result, filePath)
     }
   }
 
-  // readelf 헤더 파싱
   if (readelfResult.success && readelfResult.stdout) {
     const lines = readelfResult.stdout.split('\n');
     for (const line of lines) {
@@ -328,7 +303,6 @@ function parseLinuxBinaryInfo(fileResult, readelfResult, sha256Result, filePath)
     }
   }
 
-  // SHA256 파싱
   if (sha256Result.success && sha256Result.stdout) {
     const parts = sha256Result.stdout.split(/\s+/);
     if (parts[0]) result.sha256 = parts[0];
@@ -350,5 +324,9 @@ function parseDynamicDeps(output) {
   return deps;
 }
 
-// Start server
-server.run({ transport: 'stdio' }).catch(console.error);
+// stdio 전송으로 MCP 서버 시작
+const transport = new StdioServerTransport();
+server.connect(transport).catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

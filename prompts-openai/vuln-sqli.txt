@@ -187,7 +187,7 @@ You MUST follow the auto-injected `todo.txt`. If code tracing discovers addition
 @include(shared/_analysis-efficiency-limits.txt)
 @include(shared/_analysis-stop-rules.txt)
 
-**Hard Caps**: After **12 file opens** or **8 searches**, stop discovery, record a recon gap, and proceed to deliverables.
+**Hard Caps**: After **{{FILE_OPEN_CAP}} file opens** or **{{SEARCH_CAP}} searches**, stop discovery, record a recon gap, and proceed to deliverables.
 
 ### 6.4 No Live Exploitation
 Do not run payloads that could extract data or modify state.

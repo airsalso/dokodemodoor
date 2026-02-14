@@ -9,7 +9,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import path from 'path';
-import { shQuote, isRgAvailable, ensureInSandbox } from '../utils/shell-utils.js';
+import { shQuote, isRgAvailable, recoverPath, ensureInSandbox } from '../utils/shell-utils.js';
 
 const execAsync = promisify(exec);
 const DEFAULT_MAX_RESULTS = 400;
@@ -38,8 +38,9 @@ export async function listFiles(args = {}) {
     const maxResults = args.max_results ?? DEFAULT_MAX_RESULTS;
     const workDir = args.cwd ? path.resolve(targetDir, args.cwd) : targetDir;
 
-    // 1. Hardened Sandbox Check
+    // 1. Recover path (LLM 오타/환각 보정) + Sandbox Check
     let basePath = path.isAbsolute(inputPath) ? inputPath : path.resolve(workDir, inputPath);
+    basePath = await recoverPath(basePath, targetDir);
     basePath = ensureInSandbox(basePath, targetDir);
 
     if (!existsSync(basePath)) {
@@ -69,12 +70,11 @@ export async function listFiles(args = {}) {
     const rawFiles = stdout.trim().split('\n').filter(Boolean);
     const files = rawFiles.map(f => path.relative(targetDir, f));
 
-    return createToolResult({
-      status: 'success',
-      message: `Found ${files.length} files`,
-      files: files,
-      count: files.length
-    });
+    const header = `FOUND_FILES: ${files.length}`;
+    return {
+      content: [{ type: 'text', text: `${header}\n\n${files.join('\n')}` }],
+      isError: false
+    };
 
   } catch (error) {
     return createToolResult({

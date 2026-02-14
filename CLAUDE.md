@@ -136,7 +136,7 @@ npm run re-scan -- "C:\path\to\binary.exe" --config configs/profile/sample-re.ya
 - Environment variables go in `.env` (see `.env.example`)
 - Key env vars:
   - **LLM**: `DOKODEMODOOR_LLM_PROVIDER`, `VLLM_BASE_URL`, `VLLM_MODEL`, `VLLM_API_KEY`, `VLLM_TEMPERATURE`
-  - **Turns**: `VLLM_MAX_TURNS` (global), `DOKODEMODOOR_*_MAX_TURNS` (per-agent overrides)
+  - **Turns**: `VLLM_MAX_TURNS` (global), `DOKODEMODOOR_*_MAX_TURNS` (per-agent overrides). 실행 시간 단축 권장: `DOKODEMODOOR_PRERECON_MAX_TURNS=200~300`, `DOKODEMODOOR_RECON_MAX_TURNS=200~250`
   - **Context**: `DOKODEMODOOR_CONTEXT_COMPRESSION_THRESHOLD`, `DOKODEMODOOR_CONTEXT_COMPRESSION_WINDOW`
   - **Execution**: `DOKODEMODOOR_PARALLEL_LIMIT`, `DOKODEMODOOR_SKIP_EXPLOITATION`
   - **Tool skips**: `DOKODEMODOOR_SKIP_NMAP`, `DOKODEMODOOR_SKIP_SEMGREP`, `DOKODEMODOOR_SKIP_OSV`, etc.

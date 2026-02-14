@@ -680,14 +680,25 @@ export const updateSession = async (sessionId, updates) => {
 
     // Preserve the current state before applying updates
     const currentState = store.sessions[sessionId];
+    const resolvedUpdates = typeof updates === 'function'
+      ? (await updates(currentState)) || {}
+      : (updates || {});
+    if (typeof resolvedUpdates !== 'object') {
+      throw new PentestError(
+        `Invalid session updates for ${sessionId} (must be object or function)`,
+        'validation',
+        false,
+        { sessionId, updatesType: typeof updates }
+      );
+    }
     const newState = {
       ...currentState,
-      ...updates
+      ...resolvedUpdates
     };
 
     // Auto-sync status if any agent-related fields were updated
     const agentFields = ['completedAgents', 'failedAgents', 'skippedAgents', 'runningAgents'];
-    const wasAgentListUpdated = Object.keys(updates).some(key => agentFields.includes(key));
+    const wasAgentListUpdated = Object.keys(resolvedUpdates).some(key => agentFields.includes(key));
 
     if (wasAgentListUpdated) {
       const { status } = getSessionStatus(newState);
@@ -1063,28 +1074,18 @@ export const getNextAgent = (session) => {
 export const markAgentCompleted = async (sessionId, agentName, checkpointCommit) => {
   validateAgent(agentName);
 
-  // Get fresh session data
-  const session = await getSession(sessionId);
-  if (!session) {
-    throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
-  }
-
-  const updates = {
-    completedAgents: [...new Set([...(session.completedAgents || []), agentName])],
-    skippedAgents: (session.skippedAgents || []).filter(agent => agent !== agentName),
-    failedAgents: (session.failedAgents || []).filter(agent => agent !== agentName),
-    runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName),
-    checkpoints: {
-      ...session.checkpoints,
+  return await updateSession(sessionId, (session) => {
+    // NOTE: Must be computed under the store lock to prevent lost updates during parallel phases.
+    const completedAgents = [...new Set([...(session.completedAgents || []), agentName])];
+    const skippedAgents = (session.skippedAgents || []).filter(agent => agent !== agentName);
+    const failedAgents = (session.failedAgents || []).filter(agent => agent !== agentName);
+    const runningAgents = (session.runningAgents || []).filter(agent => agent !== agentName);
+    const checkpoints = {
+      ...(session.checkpoints || {}),
       [agentName]: checkpointCommit
-    }
-  };
-
-  // Sync session status
-  const { status } = getSessionStatus({ ...session, ...updates });
-  updates.status = status;
-
-  return await updateSession(sessionId, updates);
+    };
+    return { completedAgents, skippedAgents, failedAgents, runningAgents, checkpoints };
+  });
 };
 
 // Mark agent as failed
@@ -1110,23 +1111,13 @@ export const markAgentCompleted = async (sessionId, agentName, checkpointCommit)
 export const markAgentFailed = async (sessionId, agentName) => {
   validateAgent(agentName);
 
-  const session = await getSession(sessionId);
-  if (!session) {
-    throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
-  }
-
-  const updates = {
-    failedAgents: [...new Set([...(session.failedAgents || []), agentName])],
-    skippedAgents: (session.skippedAgents || []).filter(agent => agent !== agentName),
-    completedAgents: (session.completedAgents || []).filter(agent => agent !== agentName),
-    runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName)
-  };
-
-  // Sync session status
-  const { status } = getSessionStatus({ ...session, ...updates });
-  updates.status = status;
-
-  return await updateSession(sessionId, updates);
+  return await updateSession(sessionId, (session) => {
+    const failedAgents = [...new Set([...(session.failedAgents || []), agentName])];
+    const skippedAgents = (session.skippedAgents || []).filter(agent => agent !== agentName);
+    const completedAgents = (session.completedAgents || []).filter(agent => agent !== agentName);
+    const runningAgents = (session.runningAgents || []).filter(agent => agent !== agentName);
+    return { failedAgents, skippedAgents, completedAgents, runningAgents };
+  });
 };
 
 // Mark agent as skipped
@@ -1152,23 +1143,13 @@ export const markAgentFailed = async (sessionId, agentName) => {
 export const markAgentSkipped = async (sessionId, agentName) => {
   validateAgent(agentName);
 
-  const session = await getSession(sessionId);
-  if (!session) {
-    throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
-  }
-
-  const updates = {
-    skippedAgents: [...new Set([...(session.skippedAgents || []), agentName])],
-    failedAgents: (session.failedAgents || []).filter(agent => agent !== agentName),
-    completedAgents: (session.completedAgents || []).filter(agent => agent !== agentName),
-    runningAgents: (session.runningAgents || []).filter(agent => agent !== agentName)
-  };
-
-  // Sync session status
-  const { status } = getSessionStatus({ ...session, ...updates });
-  updates.status = status;
-
-  return await updateSession(sessionId, updates);
+  return await updateSession(sessionId, (session) => {
+    const skippedAgents = [...new Set([...(session.skippedAgents || []), agentName])];
+    const failedAgents = (session.failedAgents || []).filter(agent => agent !== agentName);
+    const completedAgents = (session.completedAgents || []).filter(agent => agent !== agentName);
+    const runningAgents = (session.runningAgents || []).filter(agent => agent !== agentName);
+    return { skippedAgents, failedAgents, completedAgents, runningAgents };
+  });
 };
 
 // Mark agent as running
@@ -1181,22 +1162,11 @@ export const markAgentSkipped = async (sessionId, agentName) => {
 export const markAgentRunning = async (sessionId, agentName) => {
   validateAgent(agentName);
 
-  const session = await getSession(sessionId);
-  if (!session) {
-    throw new PentestError(`Session ${sessionId} not found`, 'validation', false);
-  }
-
-  const updates = {
-    runningAgents: [...new Set([...(session.runningAgents || []), agentName])],
-    // If it was marked as failed before, clear it when we start running again
-    failedAgents: (session.failedAgents || []).filter(a => a !== agentName)
-  };
-
-  // Sync session status
-  const { status } = getSessionStatus({ ...session, ...updates });
-  updates.status = status;
-
-  return await updateSession(sessionId, updates);
+  return await updateSession(sessionId, (session) => {
+    const runningAgents = [...new Set([...(session.runningAgents || []), agentName])];
+    const failedAgents = (session.failedAgents || []).filter(a => a !== agentName);
+    return { runningAgents, failedAgents };
+  });
 };
 
 // Get time ago helper

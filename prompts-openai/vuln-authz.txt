@@ -230,8 +230,8 @@ You MUST follow the auto-injected `todo.txt`. If code tracing reveals additional
 **PRAGMATIC COMPLETION**: You are expected to cover all high-risk Authorization targets. If the codebase is too large, prioritize findings based on confirmed impact without stalling.
 
 ### 7.4 File-Scan Cap (MANDATORY)
-You may open at most **10 code files total** during this phase.
-- After 10 file opens, **stop scanning** and proceed to **deliverables** using the best available evidence.
+You may open at most **{{FILE_OPEN_CAP}} code files total** during this phase.
+- After {{FILE_OPEN_CAP}} file opens, **stop scanning** and proceed to **deliverables** using the best available evidence.
 - If Recon/Recon-Verify evidence is inconsistent or missing, **state that explicitly** and still complete deliverables.
  - **Conditional Relaxation**: If middleware-first analysis confirms stable, shared guard logic for the main routing layer **and** you have validated at least **3 high-risk candidates** from recon, you MAY open up to **3 additional files** to validate remaining high-risk routes.
 

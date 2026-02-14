@@ -230,7 +230,7 @@ async function runOSVAnalysis(sourceDir) {
  * [호출자]
  * - executePreReconPhase()
  */
-async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvailability, sessionId = null) {
+async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvailability, sessionId = null, caps = null) {
   // Check if using vLLM provider to decide on sequential execution
   const { isVLLMProvider, config: envConfig } = await import('../config/env.js').catch(() => ({ isVLLMProvider: () => false, config: null }));
   const useSequential = isVLLMProvider() && !envConfig?.dokodemodoor?.preReconParallel;
@@ -324,7 +324,8 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
       AGENTS['pre-recon'].displayName,
       'pre-recon',
       chalk.cyan,
-      { id: sessionId, webUrl }
+      { id: sessionId, webUrl },
+      { caps }
     );
 
     return { nmap, subfinder, whatweb, codeAnalysis, semgrep, osv };
@@ -407,7 +408,8 @@ async function runPreReconWave1(webUrl, sourceDir, variables, config, toolAvaila
       AGENTS['pre-recon'].displayName,
       'pre-recon',
       chalk.cyan,
-      { id: sessionId, webUrl }
+      { id: sessionId, webUrl },
+      { caps }
     )
   );
 
@@ -649,12 +651,12 @@ Report generated at: ${getLocalISOString()}
  * [호출자]
  * - dokodemodoor.mjs
  */
-export async function executePreReconPhase(webUrl, sourceDir, variables, config, toolAvailability, sessionId = null) {
+export async function executePreReconPhase(webUrl, sourceDir, variables, config, toolAvailability, sessionId = null, caps = null) {
   console.log(chalk.yellow.bold('\n🔍 PHASE 1: PRE-RECONNAISSANCE'));
   const timer = new Timer('phase-1-pre-recon');
 
   console.log(chalk.yellow('Wave 1: Initial footprinting...'));
-  const wave1Results = await runPreReconWave1(webUrl, sourceDir, variables, config, toolAvailability, sessionId);
+  const wave1Results = await runPreReconWave1(webUrl, sourceDir, variables, config, toolAvailability, sessionId, caps);
   console.log(chalk.green('  ✅ Wave 1 operations completed'));
 
   console.log(chalk.yellow('Wave 2: Additional scanning...'));
