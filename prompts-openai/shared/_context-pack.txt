@@ -1,0 +1,17 @@
+# CONTEXT PACKS (ANTI-CONTEXT-EXPLOSION)
+
+This project generates small, structured "Context Packs" under `deliverables/_context/` to avoid pasting entire recon reports into every specialist prompt.
+
+## Priority Order (MANDATORY)
+1. `deliverables/_context/recon_verify_targets.json` (verified, category-tagged target list)
+2. `deliverables/_context/api_fuzzer_hotspots.json` (top anomalies and crash/leak signals)
+3. Only if needed: `deliverables/recon_verify_deliverable.md` excerpt for your category
+4. Only if needed: `deliverables/recon_deliverable.md` and `deliverables/api_fuzzer_deliverable.md` excerpts
+
+## Progressive Retrieval Rules (NON-NEGOTIABLE)
+- Do NOT read full recon deliverables unless absolutely necessary.
+- When you need more detail:
+  - Use `search_file` to locate the specific section/endpoint.
+  - Use `open_file` to read only the relevant excerpt.
+- Never paste entire deliverables into your output.
+

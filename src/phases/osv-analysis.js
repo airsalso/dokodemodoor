@@ -22,12 +22,31 @@ const OSV_ECOSYSTEM_MAP = {
   dart: 'Pub',
 };
 
+const OSV_MAX_MANIFESTS_PER_TYPE = (() => {
+  const raw = process.env.DOKODEMODOOR_OSV_MAX_MANIFESTS_PER_TYPE;
+  const n = raw ? parseInt(raw, 10) : 10;
+  return Number.isFinite(n) && n > 0 ? n : 10;
+})();
+
+const OSV_MANIFEST_GLOB_MAX_DEPTH = (() => {
+  const raw = process.env.DOKODEMODOOR_OSV_MANIFEST_GLOB_MAX_DEPTH;
+  const n = raw ? parseInt(raw, 10) : 6;
+  return Number.isFinite(n) && n > 0 ? n : 6;
+})();
+
+const OSV_QUERYBATCH_CHUNK_SIZE = (() => {
+  const raw = process.env.DOKODEMODOOR_OSV_QUERYBATCH_CHUNK_SIZE;
+  const n = raw ? parseInt(raw, 10) : 128;
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 512) : 128;
+})();
+
 // ─────────────────────────────────────────────
 // Manifest file → ecosystem type mapping
 // ─────────────────────────────────────────────
 const MANIFEST_CHECKS = [
   // Lockfiles first (more accurate resolved versions)
   { type: 'npm',    file: 'package-lock.json',  lockFor: 'package.json' },
+  { type: 'npm',    file: 'npm-shrinkwrap.json', lockFor: 'package.json' },
   { type: 'npm',    file: 'yarn.lock',          lockFor: 'package.json' },
   { type: 'npm',    file: 'pnpm-lock.yaml',     lockFor: 'package.json' },
   { type: 'ruby',   file: 'Gemfile.lock',       lockFor: 'Gemfile' },
@@ -195,6 +214,12 @@ export async function detectEcosystems(sourceDir) {
     }
   }
 
+  // Root check: requirements*.txt (common in webapps, beyond requirements.txt)
+  const rootRequirements = await glob('requirements*.txt', { cwd: sourceDir, nodir: true, ignore: GLOB_IGNORE });
+  for (const file of rootRequirements) {
+    addEco('pip', file, path.join(sourceDir, file));
+  }
+
   // Root check for .NET project files (*.csproj, *.fsproj, *.vbproj)
   const rootCsprojFiles = await glob('*.{csproj,fsproj,vbproj}', { cwd: sourceDir, nodir: true });
   for (const file of rootCsprojFiles) {
@@ -222,6 +247,8 @@ export async function detectEcosystems(sourceDir) {
 
   // 2) Subdirectory search (always, to support monorepos)
   const allPatterns = MANIFEST_CHECKS.map(c => `**/${c.file}`);
+  // requirements*.txt (pip) in subdirs
+  allPatterns.push('**/requirements*.txt');
   // Add wildcard patterns for files with variable names (.csproj, .fsproj, .vbproj)
   allPatterns.push('**/*.csproj', '**/*.fsproj', '**/*.vbproj');
   const uniquePatterns = [...new Set(allPatterns)];
@@ -232,7 +259,7 @@ export async function detectEcosystems(sourceDir) {
       cwd: sourceDir,
       nodir: true,
       ignore: GLOB_IGNORE,
-      maxDepth: 6,
+      maxDepth: OSV_MANIFEST_GLOB_MAX_DEPTH,
     });
     for (const rel of files) {
       // Skip root files (already handled)
@@ -245,6 +272,9 @@ export async function detectEcosystems(sourceDir) {
       let type = getTypeForFile(basename);
       if (!type && /\.(csproj|fsproj|vbproj)$/.test(basename)) {
         type = 'nuget';
+      }
+      if (!type && /^requirements.*\.txt$/i.test(basename)) {
+        type = 'pip';
       }
       if (!type) continue;
 
@@ -275,7 +305,7 @@ export async function detectEcosystems(sourceDir) {
   const limited = [];
   for (const eco of ecosystems) {
     perType[eco.type] = (perType[eco.type] || 0) + 1;
-    if (perType[eco.type] <= 5) limited.push(eco);
+    if (perType[eco.type] <= OSV_MAX_MANIFESTS_PER_TYPE) limited.push(eco);
   }
 
   return limited;
@@ -346,6 +376,9 @@ function extractNpm(content, file, deps) {
   if (file === 'package-lock.json') {
     return extractNpmLockfile(content, deps);
   }
+  if (file === 'npm-shrinkwrap.json') {
+    return extractNpmLockfile(content, deps);
+  }
   if (file === 'yarn.lock') {
     return extractYarnLock(content, deps);
   }
@@ -367,6 +400,8 @@ function extractNpmLockfile(content, deps) {
   const packages = lock.packages || {};
   for (const [key, info] of Object.entries(packages)) {
     if (!key || key === '') continue; // root package
+    // Only record third-party packages. Workspaces appear as "packages/..." and should not be queried to OSV.
+    if (!key.startsWith('node_modules/')) continue;
     const name = key.replace(/^node_modules\//, '');
     if (name.includes('node_modules/')) continue; // skip nested
     if (info.version) deps.push({ name, version: info.version });
@@ -594,6 +629,8 @@ function extractGradle(content, file, deps) {
     return extractGradleVersionCatalog(content, deps);
   }
 
+  const vars = parseGradleVersionVars(content);
+
   // All dependency configurations:
   // implementation, api, compileOnly, runtimeOnly, testImplementation, testRuntimeOnly,
   // annotationProcessor, kapt, ksp, provided
@@ -610,7 +647,8 @@ function extractGradle(content, file, deps) {
   while ((m = re1.exec(content)) !== null) {
     const parts = m[1].split(':');
     if (parts.length >= 3) {
-      const version = parts[2].replace(/[\^~>=]/g, '').split(/[^0-9a-zA-Z.-]/)[0];
+      const versionRaw = resolveGradleVersion(parts[2], vars);
+      const version = versionRaw.replace(/[\^~>=]/g, '').split(/[^0-9a-zA-Z.-]/)[0];
       if (version) deps.push({ name: `${parts[0]}:${parts[1]}`, version });
     }
   }
@@ -621,7 +659,8 @@ function extractGradle(content, file, deps) {
     'gs'
   );
   while ((m = re2.exec(content)) !== null) {
-    const version = m[3].replace(/[\^~>=]/g, '').split(/[^0-9a-zA-Z.-]/)[0];
+    const versionRaw = resolveGradleVersion(m[3], vars);
+    const version = versionRaw.replace(/[\^~>=]/g, '').split(/[^0-9a-zA-Z.-]/)[0];
     if (version) deps.push({ name: `${m[1]}:${m[2]}`, version });
   }
 
@@ -637,6 +676,42 @@ function extractGradle(content, file, deps) {
   }
   deps.length = 0;
   deps.push(...unique);
+}
+
+function parseGradleVersionVars(content) {
+  const vars = {};
+
+  // Groovy DSL: fooVersion = '1.2.3', ext.fooVersion = '1.2.3'
+  const re1 = /^\s*(?:ext\.)?([a-zA-Z_][a-zA-Z0-9_.-]*)\s*=\s*["']([^"']+)["']/gm;
+  let m;
+  while ((m = re1.exec(content)) !== null) {
+    const key = m[1];
+    const value = m[2].trim();
+    if (key && value && /^\d/.test(value)) vars[key] = value;
+  }
+
+  // Kotlin DSL: val fooVersion = "1.2.3"
+  const re2 = /^\s*val\s+([a-zA-Z_][a-zA-Z0-9_.-]*)\s*=\s*"([^"]+)"/gm;
+  while ((m = re2.exec(content)) !== null) {
+    const key = m[1];
+    const value = m[2].trim();
+    if (key && value && /^\d/.test(value)) vars[key] = value;
+  }
+
+  return vars;
+}
+
+function resolveGradleVersion(versionExpr, vars) {
+  const raw = String(versionExpr || '').trim();
+  if (!raw) return '';
+
+  // "$var" or "${var}"
+  const m1 = raw.match(/^\$([a-zA-Z_][a-zA-Z0-9_.-]*)$/);
+  if (m1 && vars[m1[1]]) return vars[m1[1]];
+  const m2 = raw.match(/^\$\{([a-zA-Z_][a-zA-Z0-9_.-]*)\}$/);
+  if (m2 && vars[m2[1]]) return vars[m2[1]];
+
+  return raw;
 }
 
 function extractGradleVersionCatalog(content, deps) {
@@ -826,12 +901,52 @@ function extractNuget(content, file, deps) {
   }
   // .csproj: <PackageReference Include="Name" Version="1.0.0" />
   if (file.endsWith('.csproj') || file.endsWith('.fsproj') || file.endsWith('.vbproj')) {
-    const re = /<PackageReference\s+[^>]*Include="([^"]+)"[^>]*Version="([^"]+)"/gi;
+    const props = parseMsbuildProperties(content);
+
+    const re = /<PackageReference\s+[^>]*(?:Include|Update)="([^"]+)"[^>]*Version="([^"]+)"/gi;
     let m;
     while ((m = re.exec(content)) !== null) {
-      deps.push({ name: m[1], version: m[2] });
+      const resolved = resolveMsbuildProperty(m[2], props);
+      deps.push({ name: m[1], version: resolved });
+    }
+
+    // Also support:
+    // <PackageReference Include="Name">
+    //   <Version>1.2.3</Version>
+    // </PackageReference>
+    const blockRe = /<PackageReference\s+[^>]*(?:Include|Update)="([^"]+)"[^>]*>([\s\S]*?)<\/PackageReference>/gi;
+    while ((m = blockRe.exec(content)) !== null) {
+      const name = m[1];
+      const inner = m[2] || '';
+      const verTag = inner.match(/<Version\s*>([^<]+)<\/Version>/i);
+      if (!verTag) continue;
+      const resolved = resolveMsbuildProperty(verTag[1].trim(), props);
+      if (resolved) deps.push({ name, version: resolved });
     }
   }
+}
+
+function parseMsbuildProperties(content) {
+  const props = {};
+  const groups = content.match(/<PropertyGroup[^>]*>[\s\S]*?<\/PropertyGroup>/gi) || [];
+  const re = /<([a-zA-Z_][a-zA-Z0-9_.-]*)\s*>([^<]+)<\/\1>/g;
+  for (const g of groups) {
+    let m;
+    while ((m = re.exec(g)) !== null) {
+      const key = m[1];
+      const value = m[2].trim();
+      if (key && value) props[key] = value;
+    }
+  }
+  return props;
+}
+
+function resolveMsbuildProperty(versionExpr, props) {
+  const raw = String(versionExpr || '').trim();
+  if (!raw) return '';
+  const m = raw.match(/^\$\(([^)]+)\)$/);
+  if (m && props[m[1]]) return props[m[1]];
+  return raw;
 }
 
 // ── Dart/Flutter ─────────────────────────────
@@ -886,45 +1001,85 @@ export async function queryOsvBatch(deps, ecosystemType, sourceDir) {
 
   const targetDeps = deps.slice(0, 500);
 
-  for (const dep of targetDeps) {
+  const projectName = path.basename(sourceDir);
+
+  const logQuery = async (dep) => {
+    const timestamp = getLogTimestamp();
+    const logEntry = `[${timestamp}] Project: ${projectName} | OSV Request: ecosystem=${ecosystem}, package=${dep.name}, version=${dep.version}\n`;
     try {
-      const query = {
-        version: dep.version,
-        package: {
-          name: dep.name,
-          ecosystem: ecosystem
+      const osvLogDir = path.join(DOKODEMODOOR_ROOT, 'osv-logs');
+      if (!await fs.pathExists(osvLogDir)) await fs.ensureDir(osvLogDir);
+      await fs.appendFile(path.join(osvLogDir, 'outbound_osv_requests.log'), logEntry);
+    } catch {
+      // Silently continue if logging fails
+    }
+  };
+
+  // Prefer OSV /v1/querybatch for speed. Fallback to /v1/query per dependency.
+  const chunks = [];
+  for (let i = 0; i < targetDeps.length; i += OSV_QUERYBATCH_CHUNK_SIZE) {
+    chunks.push(targetDeps.slice(i, i + OSV_QUERYBATCH_CHUNK_SIZE));
+  }
+
+  for (const chunk of chunks) {
+    const queries = chunk.map(dep => ({
+      version: dep.version,
+      package: { name: dep.name, ecosystem }
+    }));
+    try {
+      // Per-dep audit trail (kept for security review).
+      for (const dep of chunk) {
+        await logQuery(dep);
+      }
+
+      const payload = { queries };
+      const response = await $`curl -s -H ${'Content-Type: application/json'} -X POST -d ${JSON.stringify(payload)} https://api.osv.dev/v1/querybatch`;
+      const data = JSON.parse(response.stdout || '{}');
+      const results = Array.isArray(data.results) ? data.results : null;
+      if (!results || results.length !== chunk.length) {
+        throw new Error('OSV querybatch returned unexpected results shape');
+      }
+
+      for (let i = 0; i < results.length; i++) {
+        const dep = chunk[i];
+        const r = results[i] || {};
+        if (Array.isArray(r.vulns) && r.vulns.length > 0) {
+          vulns.push({
+            package: dep.name,
+            version: dep.version,
+            vulnerabilities: r.vulns.map(v => ({
+              id: v.id,
+              summary: v.summary,
+              details: v.details?.substring(0, 1000),
+              published: v.published
+            }))
+          });
         }
-      };
-
-      // 🔍 Log the outbound request for security auditing
-      const projectName = path.basename(sourceDir);
-      const timestamp = getLogTimestamp();
-      const logEntry = `[${timestamp}] Project: ${projectName} | OSV Request: ecosystem=${ecosystem}, package=${dep.name}, version=${dep.version}\n`;
-      try {
-        const osvLogDir = path.join(DOKODEMODOOR_ROOT, 'osv-logs');
-        if (!await fs.pathExists(osvLogDir)) await fs.ensureDir(osvLogDir);
-        await fs.appendFile(path.join(osvLogDir, 'outbound_osv_requests.log'), logEntry);
-      } catch (err) {
-        // Silently continue if logging fails
       }
-
-      const response = await $`curl -s -X POST -d ${JSON.stringify(query)} https://api.osv.dev/v1/query`;
-      const data = JSON.parse(response.stdout);
-
-      if (data.vulns && data.vulns.length > 0) {
-        vulns.push({
-          package: dep.name,
-          version: dep.version,
-          vulnerabilities: data.vulns.map(v => ({
-            id: v.id,
-            summary: v.summary,
-            details: v.details?.substring(0, 1000),
-            published: v.published
-          }))
-        });
+    } catch {
+      // Fallback: query individually for this chunk
+      for (const dep of chunk) {
+        try {
+          await logQuery(dep);
+          const query = { version: dep.version, package: { name: dep.name, ecosystem } };
+          const response = await $`curl -s -H ${'Content-Type: application/json'} -X POST -d ${JSON.stringify(query)} https://api.osv.dev/v1/query`;
+          const data = JSON.parse(response.stdout || '{}');
+          if (Array.isArray(data.vulns) && data.vulns.length > 0) {
+            vulns.push({
+              package: dep.name,
+              version: dep.version,
+              vulnerabilities: data.vulns.map(v => ({
+                id: v.id,
+                summary: v.summary,
+                details: v.details?.substring(0, 1000),
+                published: v.published
+              }))
+            });
+          }
+        } catch {
+          // Silently continue on individual query failures
+        }
       }
-    } catch (error) {
-      // Silently continue on individual query failures
     }
   }
 

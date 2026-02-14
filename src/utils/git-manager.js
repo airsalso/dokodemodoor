@@ -114,11 +114,14 @@ export const preserveDeliverables = async (sourceDir, action) => {
   const outputsDir = path.join(sourceDir, 'outputs');
   const tempDir = path.join(os.tmpdir(), `dokodemodoor_backup_${Date.now()}_${Math.floor(Math.random() * 1000)}`);
 
+  let hasDeliverables = false;
+  let hasOutputs = false;
+
   try {
     // 1. 디렉터리 존재 여부 확인 및 백업
     await fs.ensureDir(tempDir);
-    const hasDeliverables = await fs.pathExists(deliverablesDir);
-    const hasOutputs = await fs.pathExists(outputsDir);
+    hasDeliverables = await fs.pathExists(deliverablesDir);
+    hasOutputs = await fs.pathExists(outputsDir);
 
     if (hasDeliverables) {
       await fs.copy(deliverablesDir, path.join(tempDir, 'deliverables'));
@@ -139,8 +142,21 @@ export const preserveDeliverables = async (sourceDir, action) => {
     }
   } catch (error) {
     console.log(chalk.yellow(`    ⚠️  Preservation warning: ${error.message}`));
-    // 보존에 실패하더라도 원래 작업은 시도
-    await action();
+    // 복구 시도: action()은 이미 실행됐을 수 있어 재호출하면 deliverables만 한 번 더 초기화됨.
+    // 대신 temp 백업이 있으면 복원만 시도하여 유실 방지.
+    try {
+      if (hasDeliverables && await fs.pathExists(path.join(tempDir, 'deliverables'))) {
+        await fs.copy(path.join(tempDir, 'deliverables'), deliverablesDir, { overwrite: true });
+        console.log(chalk.gray('    Restored deliverables from backup after error'));
+      }
+      if (hasOutputs && await fs.pathExists(path.join(tempDir, 'outputs'))) {
+        await fs.copy(path.join(tempDir, 'outputs'), outputsDir, { overwrite: true });
+        console.log(chalk.gray('    Restored outputs from backup after error'));
+      }
+    } catch (restoreErr) {
+      console.log(chalk.red(`    ❌ Failed to restore from backup: ${restoreErr.message}`));
+    }
+    throw error;
   } finally {
     try {
       if (await fs.pathExists(tempDir)) {

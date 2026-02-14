@@ -4,6 +4,7 @@
 .dokodemodoor-store.json.tmp
 audit-logs
 agent-logs
+binary
 osv-logs
 deliverables
 mcp-server/node_modules

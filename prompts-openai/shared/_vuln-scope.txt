@@ -7,13 +7,19 @@
 - **curl (via bash)**: Use for raw HTTP/S packet analysis, direct protocol probing, and bypassing client-side validation during investigation.
 
 ### 🔍 MULTI-SOURCE INTEL SYNERGY (MANDATORY)
-Do NOT rely solely on `recon_verify_deliverable.md`. To ensure maximum coverage, you MUST correlate findings from:
-1.  **`deliverables/recon_verify_deliverable.md`**: Primary, high-confidence targets.
-2.  **`deliverables/recon_deliverable.md`**: Broad tactical map. Scan all tables for candidates relevant to your category.
-3.  **`deliverables/api_fuzzer_deliverable.md`**: Pay close attention to **Anomalies / 4xx / 5xx Findings**. Fuzzing crashes or unusual errors often mask exploitable logic flaws.
-4.  **Static Analysis Hotspots**: Semgrep and OSV findings (see below).
+Your job is to maximize vulnerability discovery without triggering context explosion.
+
+Prefer compact, structured inputs first (Context Packs). Only perform progressive retrieval of large deliverables when you need a specific excerpt.
+
+You MUST correlate findings from:
+1. **`deliverables/_context/recon_verify_targets.json`**: Primary, category-tagged verified targets (preferred).
+2. **`deliverables/_context/api_fuzzer_hotspots.json`**: High-signal anomalies/hotspots (preferred).
+3. **`deliverables/recon_verify_deliverable.md`**: Only excerpt(s) relevant to your category if packs are missing/incomplete.
+4. **Static Analysis Hotspots**: Semgrep and OSV findings (see below).
 
 **Synergy Goal**: Use the fuzzer's errors and static analysis hotspots to discover paths that initial recon might have missed.
+
+@include(shared/_context-pack.txt)
 
 ### 💾 CUMULATIVE ANALYSIS & RESULTS MERGING
 If you see a **## EXISTING FINDINGS (Cumulative Analysis Mode)** section in your context:

@@ -275,11 +275,48 @@ npm run re-scan -- <binary_path> [options]
 
 | 인자/옵션 | 필수 | 설명 | 예시 |
 |-----------|------|------|------|
-| `<binary_path>` | 필수 | 분석 대상 바이너리 경로 | `"/path/to/target/app"` 또는 `"/path/to/target/app.exe"` |
+| `<binary_path>` | (실행 시) | 분석 대상 바이너리 경로 | `"/path/to/target/app"` |
 | `--config <path>` | 선택 | YAML 설정 파일 | `--config configs/profile/sample-re.yaml` |
 | `--phase <name>` | 선택 | 특정 phase만 실행 | `--phase re-static-analysis` |
 | `--agent <name>` | 선택 | 특정 agent만 실행 | `--agent re-inventory` |
+| `--status [id]` | - | RE 세션 상태 조회 (전체 또는 세션 ID/접두사) | `--status` 또는 `--status a1b2c3d4` |
 | `--help`, `-h` | - | 도움말 출력 | - |
+
+**상태 확인**: `re-scanner.mjs` 실행 후 진행 상황을 보려면 `--status` 옵션을 사용합니다. 바이너리 경로 없이 호출합니다.
+
+```bash
+# 모든 RE 세션 상태 출력
+npm run re-scan -- --status
+
+# 특정 세션만 조회 (세션 ID 전체 또는 앞 8자)
+npm run re-scan -- --status a1b2c3d4
+```
+
+출력 내용: 대상 바이너리, 워크스페이스 경로, 세션 ID, 진행률(완료 에이전트 수/전체), Phase별 에이전트 상태(✅ COMPLETED / ⏳ RUNNING / ❌ FAILED / ⏸️ PENDING), `deliverables/` 디렉토리 파일 목록.
+
+**세션 정리(cleanup)**: RE 세션 삭제는 **re-scanner.mjs --cleanup**으로 합니다 (웹 펜테스트용 `dokodemodoor.mjs --cleanup`과 동일 스토어를 사용하지만, RE 작업은 한 곳에서 처리하는 것이 맞습니다).
+
+```bash
+# 특정 RE 세션 삭제 (세션 ID 전체 또는 앞 8자)
+npm run re-scan -- --cleanup 13e0904d
+
+# 모든 RE 세션 삭제 (확인 후)
+npm run re-scan -- --cleanup
+```
+
+**작업 중단 후 세션 상태 정리 (프론트엔드 STOP)**: 프론트엔드에서 re-scanner 프로세스를 SIGKILL 등으로 강제 종료하면, 프로세스 내부의 시그널 핸들러가 실행되지 않아 세션이 `running` 상태로 남을 수 있습니다. **백엔드에서 대응 가능**합니다. 프로세스를 종료한 뒤, 같은 머신에서 아래 명령을 한 번 더 실행하면 됩니다.
+
+```bash
+# running 상태인 RE 세션 전부 interrupted 로 마킹
+npm run re-scan -- --mark-interrupted
+
+# 특정 세션만 마킹 (세션 ID를 알고 있을 때)
+npm run re-scan -- --mark-interrupted 13e0904d
+```
+
+프론트엔드 구현 제안: 사용자가 [STOP] 클릭 시 (1) 프로세스 트리 kill 후 (2) `node re-scanner.mjs --mark-interrupted` 를 실행하거나, 세션 ID를 알고 있으면 `--mark-interrupted <session_id>` 로 호출하면 됩니다. 별도 API가 없어도 됩니다.
+
+**바이너리와 워크스페이스**: 업로드한 바이너리 경로(예: `/home/.../binary/regedit.exe`)는 원본 위치에 두고, **실행 시 워크스페이스(`repos/re-<이름>/`) 안에 복사**됩니다. MCP 도구(bash, read_file 등)는 project root = 워크스페이스만 허용하므로, 에이전트에게는 **워크스페이스 내 바이너리 경로**가 전달되어 샌드박스 안에서 접근할 수 있습니다. 같은 바이너리를 다시 실행하면 수정 시각이 새로울 때만 덮어씁니다.
 
 ### 5.3 실행 모드
 
@@ -811,7 +848,19 @@ which diec
 # 경로가 나오지 않으면 DIE_PATH 환경변수 또는 설정 파일에서 절대 경로 지정
 ```
 
-### 11.4 Ghidra MCP 서비스 연결 실패
+### 11.4 "Permission Denied: Access outside project root" (bash/파일 도구)
+
+에이전트 로그에 다음과 같이 나올 수 있음:
+
+```
+Command failed: Permission Denied: Access outside project root is not allowed.
+```
+
+**원인**: MCP의 bash·read_file·search_file 등은 **project root = RE 워크스페이스(`repos/re-<이름>/`)** 안만 접근 가능함. 바이너리가 원본 경로(예: `/home/.../binary/regedit.exe`)에만 있고 워크스페이스 밖에 있으면, 에이전트가 해당 경로를 나열·접근하려 할 때 위 오류가 발생함.
+
+**해결**: re-scanner는 실행 시 **대상 바이너리를 워크스페이스에 자동 복사**하므로, 최신 버전 사용 시에는 이 오류가 나지 않아야 함. 프롬프트에 전달되는 바이너리 경로도 워크스페이스 내 경로로 통일되어, re-sigcheck 등 도구가 샌드박스 안에서 접근할 수 있음.
+
+### 11.5 Ghidra MCP 서비스 연결 실패
 
 ```
 Bridge error: connect ECONNREFUSED 127.0.0.1:8080
@@ -831,14 +880,14 @@ bash scripts/start-ghidra-mcp.sh start
 # VNC로 확인: x11vnc -display :99 -nopw -forever &
 ```
 
-### 11.5 Ghidra 분석 타임아웃
+### 11.6 Ghidra 분석 타임아웃
 
 **원인**: 대형 바이너리에서 Ghidra 분석이 오래 걸림
 **해결**:
 1. 기존 Ghidra 프로젝트가 있으면 `ghidra_project` 설정으로 지정 (재분석 생략)
 2. 바이너리 크기가 매우 큰 경우 Ghidra GUI에서 먼저 수동 분석 후 프로젝트 경로 지정
 
-### 11.6 Prerequisites 미충족
+### 11.7 Prerequisites 미충족
 
 ```
 ⏭️ Skipping re-static: prerequisite re-inventory not completed
@@ -847,7 +896,7 @@ bash scripts/start-ghidra-mcp.sh start
 **원인**: 선행 에이전트가 완료되지 않은 상태에서 후속 에이전트 실행 시도
 **해결**: 선행 에이전트부터 순서대로 실행하거나, 전체 파이프라인으로 실행
 
-### 11.7 세션/체크포인트 오류
+### 11.8 세션/체크포인트 오류
 
 **원인**: 이전 실행에서 비정상 종료된 세션 잔여
 **해결**:
@@ -860,7 +909,7 @@ rm -f sessions/*re*.json
 npm run re-scan -- "/path/to/target/my-app" --config ...
 ```
 
-### 11.8 LLM 연결 실패
+### 11.9 LLM 연결 실패
 
 **원인**: vLLM/OpenAI 엔드포인트에 연결할 수 없음
 **해결**: `.env`의 `VLLM_BASE_URL`, `VLLM_API_KEY` 확인

@@ -29,7 +29,8 @@ export function showHelp() {
   console.log('  ./dokodemodoor.mjs --rerun <agent-name> [--session <id>]');
   console.log('  ./dokodemodoor.mjs --status [--session <id>]');
   console.log('  ./dokodemodoor.mjs --list-agents');
-  console.log('  ./dokodemodoor.mjs --cleanup [session-id]                      # Delete sessions\n');
+  console.log('  ./dokodemodoor.mjs --cleanup [session-id]                      # Delete sessions');
+  console.log('  ./dokodemodoor.mjs --mark-interrupted [session-id]             # Mark running session(s) as interrupted (e.g. after STOP)\n');
 
   console.log(chalk.yellow.bold('OPTIONS:'));
   console.log('  --config <file>      YAML configuration file for authentication and testing parameters');
@@ -43,7 +44,8 @@ export function showHelp() {
   console.log('  --rerun              Rerun specific agent in isolation (does NOT affect other agents)');
   console.log('  --status             Show current session status and progress');
   console.log('  --list-agents        List all available agents and phases');
-  console.log('  --cleanup            Delete all sessions or specific session by ID\n');
+  console.log('  --cleanup            Delete all sessions or specific session by ID');
+  console.log('  --mark-interrupted   Mark running session(s) as interrupted (e.g. after frontend STOP/SIGKILL)\n');
 
   console.log(chalk.yellow.bold('EXAMPLES:'));
   console.log('  # Normal mode - create new session');
@@ -58,7 +60,9 @@ export function showHelp() {
   console.log('  ./dokodemodoor.mjs --rerun sqli-vuln --session abc123 # Rerun only sqli-vuln (isolated)');
   console.log('  ./dokodemodoor.mjs --rollback-to recon                # Rollback and invalidate all after recon');
   console.log('  ./dokodemodoor.mjs --cleanup                          # Delete all sessions');
-  console.log('  ./dokodemodoor.mjs --cleanup <session-id>             # Delete specific session\n');
+  console.log('  ./dokodemodoor.mjs --cleanup <session-id>             # Delete specific session');
+  console.log('  ./dokodemodoor.mjs --mark-interrupted                 # Mark all running sessions as interrupted');
+  console.log('  ./dokodemodoor.mjs --mark-interrupted <session-id>    # Mark specific session as interrupted\n');
 
   console.log(chalk.yellow.bold('REQUIREMENTS:'));
   console.log('  • WEB_URL must start with http:// or https://');

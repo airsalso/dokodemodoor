@@ -717,7 +717,7 @@ export const updateSession = async (sessionId, updates) => {
  * [반환값]
  * - Promise<array>
  */
-const listSessions = async () => {
+export const listSessions = async () => {
   const store = await loadSessions();
   return Object.values(store.sessions);
 };
@@ -1560,26 +1560,45 @@ export const reconcileSession = async (sessionId, options = {}) => {
 export const deleteSession = async (sessionId) => {
   return storeLock.withLock(async () => {
     const store = await loadSessions();
+    let resolvedId = store.sessions[sessionId] ? sessionId : null;
 
-    if (!store.sessions[sessionId]) {
+    if (!resolvedId) {
+      const prefixMatches = Object.keys(store.sessions || {}).filter(id => id.startsWith(sessionId));
+      if (prefixMatches.length === 1) {
+        resolvedId = prefixMatches[0];
+      } else if (prefixMatches.length > 1) {
+        throw new PentestError(
+          `Session ID '${sessionId}' is ambiguous (${prefixMatches.length} matches). Use full UUID.`,
+          'validation',
+          false,
+          { sessionId, matches: prefixMatches }
+        );
+      }
+    }
+
+    if (!resolvedId || !store.sessions[resolvedId]) {
+      const existing = Object.keys(store.sessions || {});
+      const hint = existing.length > 0
+        ? ` Existing session IDs: ${existing.map(id => id.substring(0, 8)).join(', ')}. Run --status to list.`
+        : ' Store is empty (session may already be deleted).';
       throw new PentestError(
-        `Session ${sessionId} not found`,
+        `Session ${sessionId} not found.${hint}`,
         'validation',
         false,
         { sessionId }
       );
     }
 
-    const deletedSession = store.sessions[sessionId];
+    const deletedSession = store.sessions[resolvedId];
 
     // Physical cleanup of session artifacts
     try {
       await cleanupSessionArtifacts(deletedSession);
     } catch (cleanupError) {
-      console.log(chalk.yellow(`⚠️ Partial cleanup for session ${sessionId}: ${cleanupError.message}`));
+      console.log(chalk.yellow(`⚠️ Partial cleanup for session ${resolvedId}: ${cleanupError.message}`));
     }
 
-    delete store.sessions[sessionId];
+    delete store.sessions[resolvedId];
     await saveSessions(store);
 
     return deletedSession;

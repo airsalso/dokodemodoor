@@ -58,6 +58,48 @@ Do NOT edit `deliverables/recon_deliverable.md`.
 1. **MANDATORY SAVE**: Call `save_deliverable` with `deliverable_type: "RECON_VERIFY"` to save the final verification overlay to `deliverables/recon_verify_deliverable.md`.
 2. **VALIDATION MARKER**: The content of the overlay MUST include the string **Recon Verification Deliverable** in the title.
 3. **NO TRUNCATION**: Ensure the entire overlay is saved. If it's too large for a single tool call, you MUST still find a way to save the complete content (e.g., using `bash` with `cat >>` if absolutely necessary, but `save_deliverable` is preferred).
-4. **FINAL SIGNAL**: Only after receiving `status: "success"` from the save tool, announce: **RECON VERIFICATION COMPLETE. OVERLAY READY.**
+4. **CONTEXT PACK (MANDATORY)**: Create `deliverables/_context/recon_verify_targets.json` as specified in section 5. This file MUST be small and valid JSON.
+5. **FINAL SIGNAL**: Only after the overlay is saved successfully AND the Context Pack file is written, announce: **RECON VERIFICATION COMPLETE. OVERLAY READY.**
+
+---
+
+## 5) CONTEXT PACK OUTPUT (MANDATORY, SMALL)
+Downstream specialist agents MUST NOT ingest the full recon/recon-verify deliverables. To prevent context explosion, you MUST generate a compact Context Pack file under `deliverables/_context/`.
+
+### 5.1) Create Context Pack File
+Write a JSON file at:
+- `deliverables/_context/recon_verify_targets.json`
+
+If the directory does not exist, create it.
+
+### 5.2) Strict Format & Size Limits
+- File MUST be valid JSON.
+- Keep it SMALL: total items across all categories <= 40.
+- Each item MUST be short and VERIFIED (from your overlay), include `file_line` evidence.
+- Do NOT embed long paragraphs or raw code blocks in JSON.
+
+Recommended schema:
+```json
+{
+  "generated_at": "ISO-8601",
+  "source": "deliverables/recon_verify_deliverable.md",
+  "targets": {
+    "SQLI": [
+      { "method": "GET", "path": "/api/...", "param": "q", "file_line": "path/to/file.js:123", "notes": "1-line" }
+    ],
+    "CODEI": [],
+    "SSTI": [],
+    "PATHI": [],
+    "XSS": [],
+    "AUTH": [],
+    "AUTHZ": [],
+    "SSRF": []
+  }
+}
+```
+
+### 5.3) Write Method
+- Prefer a safe file write via `bash` (e.g., `cat <<'EOF' > deliverables/_context/recon_verify_targets.json ... EOF`).
+- Do NOT use `save_deliverable` for this JSON file; it is not a deliverable type. The deliverable remains `deliverables/recon_verify_deliverable.md`.
 
 @include(shared/_analysis-efficiency-limits.txt)

@@ -5,7 +5,8 @@ const DEVELOPER_COMMANDS = Object.freeze([
   '--rerun',
   '--status',
   '--list-agents',
-  '--cleanup'
+  '--cleanup',
+  '--mark-interrupted'
 ]);
 
 const SETUP_ONLY_FLAG = '--setup-only';

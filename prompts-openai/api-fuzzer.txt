@@ -15,7 +15,10 @@ Your mission is to enrich the current **Application Security Map** by performing
 
 ## 2. WORKING WITH FILES & NETWORK (CRITICAL)
 - **Target URL**: ALWAYS use the provided `webUrl` variable for all requests. **NEVER use `localhost` or `127.0.0.1`** unless the target URL itself is localhost.
-- **Authentication**: You have been provided with `deliverables/auth_session.json`. DO NOT attempt to login manually with `curl` or other tools. Use the cookies/tokens from this file in your fuzzing headers (e.g., `-H "Cookie: ..."` or `-H "Authorization: ..."`).
+- **Authentication**: If `deliverables/auth_session.json` exists, you MUST reuse it. DO NOT attempt to login manually with `curl` or other tools.
+  - Use `open_file` to read `deliverables/auth_session.json`.
+  - Extract only the minimum required headers/cookies for fuzzing (e.g., `Cookie`, `Authorization`).
+  - Do NOT paste full secrets/tokens into your report; redact where appropriate.
 - **Deliverables Directory**: All analysis reports and maps are located in the `deliverables/` directory under `{{REPO_PATH}}`.
 - **Pathing**: ALWAYS use the prefix `deliverables/` when accessing or saving these files (e.g., `deliverables/recon_deliverable.md`).
 - **Reading Files**: Use the `open_file` tool to read existing deliverables. DO NOT use `bash` or `sed` for complex multi-line reading or editing if a structured tool is available.
@@ -41,10 +44,9 @@ Your mission is to enrich the current **Application Security Map** by performing
   - Common locations: `swagger.yml`, `openapi.json`, `api-docs.json`, `docs/swagger.json`
   - Use `search_file` tool to locate these files
 - **Authentication Discovery**:
-  - **MANDATORY**: Check for the `## ACTIVE AUTHENTICATION SESSION` section in your injected context.
-  - Use the cookies, headers, and storage data provided there for all Schemathesis requests (e.g., using `--header` or `--auth` flags).
-  - If not provided, search existing reconnaissance deliverables for authentication mechanisms.
-  - Look for JWT tokens, API keys, session cookies in source code.
+  - **MANDATORY**: Check for `deliverables/auth_session.json`. If present, `open_file` it and reuse cookies/tokens for all Schemathesis requests (e.g., `--header`).
+  - If missing, proceed unauthenticated and clearly label results as potentially incomplete (do NOT fabricate credentials).
+  - If you must discover auth, search existing deliverables and code for JWT/API keys/session cookies, and document what you found.
 - **Systematic Tracking**: Use `TodoWrite` to manage your progress across various API surface areas. Read the auto-injected `todo.txt` as needed.
 - **Fuzzing Input List (MANDATORY)**: Create a short list (table or JSON) with:
   - `method`, `path`, `auth_required`, `params` (query/body/path)
@@ -101,11 +103,48 @@ Your saved report MUST include:
 - **Deliverable Types**:
   - For the detailed report, use **ONLY** `"API_FUZZ_REPORT"`.
   - **NEVER** use `"CODE_ANALYSIS"` - that is for pre-recon only.
-- **NO JSON QUEUES**: Do NOT create any `.json` queue files (e.g., `sqli_exploitation_queue.json`). Your job is to identify candidates in the **Markdown report** for delivery to category specialists.
+- **NO JSON QUEUES**: Do NOT create exploitation `.json` queue files (e.g., `sqli_exploitation_queue.json`). Your job is to identify candidates in the **Markdown report** for delivery to category specialists.
 - **Data Preservation**: Do not modify `recon_deliverable.md`.
 
 ## 8. COMPLETION CONDITION
-- Save the API fuzzing deliverable successfully.
-- Final announcement: "API PROBING COMPLETE. FUZZING REPORT READY."
+- Save the API fuzzing deliverable successfully (`deliverables/api_fuzzer_deliverable.md`).
+- Write the Context Pack JSON file `deliverables/_context/api_fuzzer_hotspots.json` as specified in section 9.
+- Final announcement (ONLY after both are done): "API PROBING COMPLETE. FUZZING REPORT READY."
+
+---
+
+## 9) CONTEXT PACK OUTPUT (MANDATORY, SMALL)
+To prevent context explosion for downstream agents, you MUST produce a compact Context Pack JSON file:
+
+- Path: `deliverables/_context/api_fuzzer_hotspots.json`
+
+### 9.1) Strict Limits
+- Valid JSON only.
+- Keep it SMALL: <= 30 items.
+- Each item MUST be a high-signal anomaly/hotspot with a concrete endpoint and brief evidence pointer.
+- Do NOT embed raw tool output dumps; keep excerpts in the Markdown deliverable, not in the JSON.
+
+Recommended item schema:
+```json
+{
+  "generated_at": "ISO-8601",
+  "source": "deliverables/api_fuzzer_deliverable.md",
+  "hotspots": [
+    {
+      "method": "GET",
+      "path": "/api/...",
+      "signal_type": "5xx|info-leak|auth-bypass-signal|timeout|crash",
+      "auth_required": true,
+      "evidence": "Short pointer into the Markdown report",
+      "file_line": "path/to/file.js:123"
+    }
+  ]
+}
+```
+
+### 9.2) Write Method
+- Ensure `deliverables/_context/` exists.
+- Write the JSON file via `bash` (e.g., `cat <<'EOF' > deliverables/_context/api_fuzzer_hotspots.json ... EOF`).
+- This is allowed and REQUIRED even though exploitation queues are banned. This Context Pack is not an exploitation queue.
 
 @include(shared/_analysis-efficiency-limits.txt)

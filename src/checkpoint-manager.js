@@ -560,97 +560,62 @@ const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadP
       return colorMap[agentName] || chalk.cyan;
     };
 
-    // Targeted Context Injection: Prevent specialists from repeating discovery
+    // Targeted Context Injection: Prefer compact Context Packs over full deliverables to avoid context explosion.
     let targetedContext = '';
     if (agentName.includes('-vuln') || agentName.includes('-exploit') || agentName === 'api-fuzzer') {
       const deliverablesDir = path.join(targetRepo, 'deliverables');
-      const reconPath = path.join(deliverablesDir, 'recon_deliverable.md');
-      const reconVerifyPath = path.join(deliverablesDir, 'recon_verify_deliverable.md');
-      const apiFuzzPath = path.join(deliverablesDir, 'api_fuzzer_deliverable.md');
+      const contextDir = path.join(deliverablesDir, '_context');
+      try {
+        await fs.ensureDir(contextDir);
+      } catch {}
 
       let findings = '';
 
-      // 1. Load Recon Map (for all agents)
-      if (await fs.pathExists(reconPath)) {
+      // 1) Compact per-category packs (preferred) with safe fallbacks
+      if (agentName !== 'api-fuzzer') {
         try {
-          const reconContent = await fs.readFile(reconPath, 'utf8');
-          const { content: filteredRecon, removed } = filterReconContentByAvoid(
-            reconContent,
-            distributedConfig?.avoid
-          );
-          if (removed > 0) {
-            console.log(chalk.gray(`   🧹 Filtered ${removed} recon lines due to avoid rules`));
-          }
-          findings += `## APPLICATION MAP (From Reconnaissance)\n${filteredRecon}\n\n`;
+          const { assembleTargetedContext } = await import('./utils/context-pack.js');
+          findings += await assembleTargetedContext(targetRepo, agentName, distributedConfig);
         } catch (e) {
-          console.log(chalk.yellow(`   ⚠️  Failed to read recon deliverable: ${e.message}`));
+          // Fallback: no injection rather than large file paste
         }
+      } else {
+        // api-fuzzer benefits from broad guidance but still avoid full recon paste
+        findings += `## CONTEXT PACKS (Preferred Inputs)\n` +
+          `- \`deliverables/_context/recon_verify_targets.json\` (if available)\n` +
+          `- \`deliverables/_context/api_fuzzer_hotspots.json\` (you will create/update this)\n` +
+          `- Do NOT paste or re-save full recon here. Build a compact fuzzing input list.\n`;
       }
 
-      // 1.1 Load Recon Verification Overlay (if available)
-      if (await fs.pathExists(reconVerifyPath)) {
-        try {
-          const reconVerifyContent = await fs.readFile(reconVerifyPath, 'utf8');
-          findings += `## RECON VERIFICATION OVERLAY (Verified Evidence)\n${reconVerifyContent}\n\n`;
-        } catch (e) {
-          console.log(chalk.yellow(`   ⚠️  Failed to read recon verify deliverable: ${e.message}`));
-        }
-      }
-
-      // 2. Load API Fuzzing Findings (Hotspots) - only for vuln/exploit agents, not for api-fuzzer itself
-      if (agentName !== 'api-fuzzer' && await fs.pathExists(apiFuzzPath)) {
-        try {
-          const apiFuzzContent = await fs.readFile(apiFuzzPath, 'utf8');
-          findings += `## API FUZZING HOTSPOTS (From Schemathesis)\n${apiFuzzContent}\n\n`;
-        } catch (e) {
-          console.log(chalk.yellow(`   ⚠️  Failed to read API fuzz deliverable: ${e.message}`));
-        }
-      }
-
-      // 3. Load Active Auth Session
-      const authSessionPath = path.join(deliverablesDir, 'auth_session.json');
-      if (await fs.pathExists(authSessionPath)) {
-        try {
-          const authSessionContent = await fs.readFile(authSessionPath, 'utf8');
-          findings += `## ACTIVE AUTHENTICATION SESSION\nUse the following session data for all authenticated requests (curl, schemathesis, playwright):\n\`\`\`json\n${authSessionContent}\n\`\`\`\n\n`;
-          console.log(chalk.blue(`   🔐 Injected active auth session into ${agentName} context`));
-        } catch (e) {
-          console.log(chalk.yellow(`   ⚠️  Failed to read auth session deliverable: ${e.message}`));
-        }
-      }
-
-      // 4. Load Existing Vulnerability Queue (for vuln agents during rerun/resumption)
+      // 2) Existing vulnerability queue (cumulative mode) - inject only a bounded preview
       if (agentName.includes('-vuln')) {
         const vulnType = agentName.replace('-vuln', '');
         const queuePath = path.join(deliverablesDir, `${vulnType}_exploitation_queue.json`);
-
         if (await fs.pathExists(queuePath)) {
           try {
             const queueData = await fs.readJson(queuePath);
-            const count = queueData.vulnerabilities?.length || 0;
-            if (count > 0) {
-              findings += `## EXISTING FINDINGS (Cumulative Analysis Mode)\n`;
-              findings += `The following **${count}** vulnerabilities were already discovered in previous runs/sessions:\n`;
-              findings += `\`\`\`json\n${JSON.stringify(queueData, null, 2)}\n\`\`\`\n\n`;
-              findings += `**MISSION**: Focus on discovering ADDITIONAL vulnerabilities. Do NOT re-trace or re-prove the items listed above. When you save your final deliverables, you MUST merge these existing findings with your new discoveries. The final output must be cumulative.\n\n`;
-              console.log(chalk.blue(`   ♻️  Injected ${count} existing findings for cumulative analysis`));
+            const { summarizeExistingFindingsForCumulativeMode } = await import('./utils/context-pack.js');
+            const preview = summarizeExistingFindingsForCumulativeMode(queueData, { maxItems: 20 });
+            if (preview) {
+              findings += `\n${preview}\n`;
+              console.log(chalk.blue(`   ♻️  Injected bounded existing findings preview for cumulative analysis`));
             }
-          } catch (e) {
+          } catch {
             // Silently continue if queue is unreadable or malformed
           }
         }
       }
 
-      if (findings) {
-      const contextLabel = agentName === 'api-fuzzer'
-        ? 'RECONNAISSANCE FINDINGS (STARTING POINT)'
-        : 'TARGETED ANALYSIS FINDINGS (MANDATORY STARTING POINT)';
-      const contextInstruction = agentName === 'api-fuzzer'
-        ? 'Use the reconnaissance data below to identify API endpoints and authentication mechanisms for fuzzing. Save detailed results to API_FUZZ_REPORT (working memory). Do NOT edit recon_deliverable.md:'
-        : 'Use the findings below to skip initial discovery. Proceed directly to analysis or exploitation of the following areas:';
+      if (findings && findings.trim()) {
+        const contextLabel = agentName === 'api-fuzzer'
+          ? 'RECONNAISSANCE CONTEXT (COMPACT STARTING POINT)'
+          : 'TARGETED ANALYSIS CONTEXT (COMPACT, MANDATORY STARTING POINT)';
+        const contextInstruction = agentName === 'api-fuzzer'
+          ? 'Use the compact context below to build a fuzzing input list and run schemathesis. Save results to API_FUZZ_REPORT. Prefer Context Packs under deliverables/_context/:'
+          : 'Use the compact context below to skip broad discovery. Start with verified targets/hotspots. Only open large deliverables on-demand (search then excerpt):';
 
         targetedContext = `\n\n# ${contextLabel}\n${contextInstruction}\n\n${findings}`;
-        console.log(chalk.blue(`   🎯 Injected targeted findings (Recon${agentName !== 'api-fuzzer' ? ' + API Fuzz' : ''}) into ${agentName} context`));
+        console.log(chalk.blue(`   🎯 Injected compact context into ${agentName} prompt`));
       }
     }
 
@@ -1690,6 +1655,7 @@ export const displayStatus = async (session) => {
   // Core metadata
   console.log(`${chalk.bold('Target:')} ${chalk.blue(session.webUrl)}`);
   console.log(`${chalk.bold('Repo  :')} ${chalk.gray(session.targetRepo || session.repoPath)}`);
+  console.log(`${chalk.bold('Session ID:')} ${chalk.gray(session.id)}`);
 
   // Overall status with progress bar
   const statusIcon = status === 'completed' ? '✅' : status === 'failed' ? '❌' : '🔄';

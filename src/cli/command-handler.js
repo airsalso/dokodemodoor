@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import {
   deleteSession, deleteAllSessions,
+  getSession, updateSession, listSessions,
   validateAgent, validatePhase, reconcileSession,
   findSessionByIdOrSelection
 } from '../session-manager.js';
@@ -9,6 +10,7 @@ import {
 } from '../checkpoint-manager.js';
 import { logError, PentestError } from '../error-handling.js';
 import { promptConfirmation } from './prompts.js';
+import { getLocalISOString } from '../utils/time-utils.js';
 
 // Developer command handlers
 /**
@@ -53,7 +55,10 @@ export async function handleDeveloperCommand(command, args, runAgentPromptWithRe
       if (sessionId) {
         // Cleanup specific session by ID
         const deletedSession = await deleteSession(sessionId);
-        console.log(chalk.green(`✅ Deleted session ${sessionId} (${new URL(deletedSession.webUrl).hostname})`));
+        const label = (deletedSession.webUrl || '').includes('://')
+          ? new URL(deletedSession.webUrl).hostname
+          : (deletedSession.webUrl || sessionId).replace(/^.*[/\\]/, '') || sessionId.substring(0, 8);
+        console.log(chalk.green(`✅ Deleted session ${sessionId} (${label})`));
       } else {
         // Cleanup all sessions - require confirmation
         const confirmed = await promptConfirmation(chalk.yellow('⚠️  This will delete all pentest sessions. Are you sure? (y/N):'));
@@ -67,6 +72,39 @@ export async function handleDeveloperCommand(command, args, runAgentPromptWithRe
         } else {
           console.log(chalk.gray('Cleanup cancelled'));
         }
+      }
+      return;
+    }
+
+    if (command === '--mark-interrupted') {
+      const sessionId = args[0] || providedSessionId;
+      const sessions = await listSessions();
+      let toUpdate = [];
+      if (sessionId) {
+        const match = sessions.find(s => s.id === sessionId || s.id.startsWith(sessionId));
+        if (!match) {
+          console.log(chalk.red(`Session not found: ${sessionId}`));
+          return;
+        }
+        toUpdate = [match];
+      } else {
+        toUpdate = sessions.filter(s => (s.runningAgents || []).length > 0);
+      }
+      if (toUpdate.length === 0) {
+        console.log(chalk.gray('No session(s) to mark as interrupted.'));
+        return;
+      }
+      for (const s of toUpdate) {
+        const running = s.runningAgents || [];
+        const failedAgents = new Set([...(s.failedAgents || []), ...running]);
+        await updateSession(s.id, {
+          status: 'interrupted',
+          lastActivity: getLocalISOString(),
+          runningAgents: [],
+          failedAgents: Array.from(failedAgents)
+        });
+        const label = (s.webUrl || '').includes('://') ? new URL(s.webUrl).hostname : (s.webUrl || s.id).replace(/^.*[/\\]/, '') || s.id.substring(0, 8);
+        console.log(chalk.green(`✅ Marked session ${s.id.substring(0, 8)}... (${label}) as interrupted (was running: ${running.join(', ') || 'none'})`));
       }
       return;
     }
