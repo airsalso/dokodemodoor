@@ -1,5 +1,7 @@
 .env
 .dokodemodoor-store.json
+.dokodemodoor-store.json.lock
+.dokodemodoor-store.json.tmp
 audit-logs
 agent-logs
 osv-logs

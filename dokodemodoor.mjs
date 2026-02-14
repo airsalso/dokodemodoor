@@ -10,8 +10,12 @@ import { loadConfig } from './src/config/config-loader.js';
 import { checkToolAvailability, handleMissingTools } from './src/tool-checker.js';
 
 // Session and Checkpoints
-import { createSession, updateSession, getSession, AGENTS, getPhaseIndexForAgent, checkPrerequisites, markAgentSkipped } from './src/session-manager.js';
-import { runPhase, getGitCommitHash } from './src/checkpoint-manager.js';
+import {
+  createSession, updateSession, getSession,
+  AGENTS, PHASES, getPhaseIndexForAgent, getNextAgent,
+  calculateVulnerabilityAnalysisSummary, calculateExploitationSummary
+} from './src/session-manager.js';
+import { runPhase } from './src/checkpoint-manager.js';
 
 // Setup and Deliverables
 import { setupLocalRepo } from './src/setup/environment.js';
@@ -20,13 +24,10 @@ import { setupLocalRepo } from './src/setup/environment.js';
 import { runAgentPromptWithRetry } from './src/ai/agent-executor.js';
 import { loadPrompt } from './src/prompts/prompt-manager.js';
 
-// Phases
-import { executePreReconPhase } from './src/phases/pre-recon.js';
-import { assembleFinalReport } from './src/phases/reporting.js';
-
 // Utils
 import { timingResults, costResults, displayTimingSummary, Timer } from './src/utils/metrics.js';
 import { formatDuration, generateAuditPath, ensureDirectory } from './src/audit/utils.js';
+import { getLocalISOString } from './src/utils/time-utils.js';
 
 // CLI
 import { handleDeveloperCommand } from './src/cli/command-handler.js';
@@ -37,127 +38,128 @@ import { parseCliArgs } from './src/cli/args.js';
 // Error Handling
 import { PentestError, logError } from './src/error-handling.js';
 
-// Session Manager Functions
-import {
-  calculateVulnerabilityAnalysisSummary,
-  calculateExploitationSummary,
-  getNextAgent
-} from './src/session-manager.js';
-
 // Configure zx to disable timeouts (let tools run as long as needed)
 $.timeout = 0;
 
 // Track active session globally for signal handlers
 let activeSessionId = null;
+let consoleLogStream = null;
+let origStdoutWrite = null;
+let origStderrWrite = null;
+let resourcesCleaned = false;
 
-// Setup graceful cleanup on process signals
+// Cleanup function for graceful shutdown (idempotent)
 /**
- * [목적] SIGINT 처리 및 정상 종료.
+ * [목적] 프로세스 종료 시 리소스 정리 (중복 호출 안전).
  *
  * [호출자]
- * - Node 프로세스 시그널 핸들러
- *
- * [출력 대상]
- * - 종료 메시지 출력 후 프로세스 종료
+ * - 시그널 핸들러 (SIGINT, SIGTERM, exit)
  *
  * [부작용]
- * - 프로세스 종료
+ * - 콘솔 로그 스트림 종료 및 원복
  */
-process.on('SIGINT', async () => {
-  console.log(chalk.yellow('\n⚠️ Received SIGINT, cleaning up...'));
+const cleanupResources = () => {
+  if (resourcesCleaned) return;
+  resourcesCleaned = true;
 
-  if (activeSessionId) {
+  if (consoleLogStream) {
     try {
-      // Mark session as interrupted and move running agents to failed for crash-safe state
-      const session = await getSession(activeSessionId);
-      if (session) {
-        const runningAgents = session.runningAgents || [];
-        const failedAgents = new Set([...(session.failedAgents || []), ...runningAgents]);
-        await updateSession(activeSessionId, {
-          status: 'interrupted',
-          lastActivity: getLocalISOString(),
-          runningAgents: [],
-          failedAgents: Array.from(failedAgents)
-        });
+      consoleLogStream.end();
+    } catch (e) {
+      // Ignore stream errors during cleanup
+    }
+  }
+
+  if (origStdoutWrite && origStderrWrite) {
+    try {
+      process.stdout.write = origStdoutWrite;
+      process.stderr.write = origStderrWrite;
+    } catch (e) {
+      // Ignore restore errors during cleanup
+    }
+  }
+};
+
+// Cleanup session state helper
+/**
+ * [목적] 세션 상태를 안전하게 interrupted로 마킹.
+ */
+const cleanupSession = async () => {
+  if (!activeSessionId) return;
+
+  try {
+    const session = await getSession(activeSessionId);
+    if (session) {
+      const runningAgents = session.runningAgents || [];
+      const failedAgents = new Set([...(session.failedAgents || []), ...runningAgents]);
+      await updateSession(activeSessionId, {
+        status: 'interrupted',
+        lastActivity: getLocalISOString(),
+        runningAgents: [],
+        failedAgents: Array.from(failedAgents)
+      });
+    } else {
+      await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
+    }
+    console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as interrupted`));
+  } catch (e) {
+    // Ignore errors during exit cleanup
+  }
+};
+
+// Graceful shutdown helper
+/**
+ * [목적] 시그널/에러 발생 시 세션 정리 후 프로세스 종료.
+ *
+ * [입력 파라미터]
+ * - exitCode (number) - 종료 코드
+ * - markStatus (string) - 세션에 설정할 상태 ('interrupted' | 'failed')
+ */
+const gracefulShutdown = (exitCode, markStatus = 'interrupted') => {
+  const markSession = async () => {
+    if (!activeSessionId) return;
+    try {
+      if (markStatus === 'interrupted') {
+        await cleanupSession();
       } else {
-        // Fallback: mark session as interrupted if we cannot load it
-        await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
+        await updateSession(activeSessionId, { status: markStatus, lastActivity: getLocalISOString() });
+        console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as ${markStatus}`));
       }
-      console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as interrupted`));
     } catch (e) {
       // Ignore errors during exit cleanup
     }
-  }
+  };
 
-  process.exit(0);
+  markSession().finally(() => {
+    cleanupResources();
+    process.exit(exitCode);
+  });
+};
+
+// Setup graceful cleanup on process signals
+process.on('SIGINT', () => {
+  console.log(chalk.yellow('\n⚠️ Received SIGINT, cleaning up...'));
+  gracefulShutdown(0, 'interrupted');
 });
 
-/**
- * [목적] SIGTERM 처리 및 정상 종료.
- *
- * [호출자]
- * - Node 프로세스 시그널 핸들러
- *
- * [출력 대상]
- * - 종료 메시지 출력 후 프로세스 종료
- *
- * [부작용]
- * - 프로세스 종료
- */
-process.on('SIGTERM', async () => {
+process.on('SIGTERM', () => {
   console.log(chalk.yellow('\n⚠️ Received SIGTERM, cleaning up...'));
-
-  if (activeSessionId) {
-    try {
-      const session = await getSession(activeSessionId);
-      if (session) {
-        const runningAgents = session.runningAgents || [];
-        const failedAgents = new Set([...(session.failedAgents || []), ...runningAgents]);
-        await updateSession(activeSessionId, {
-          status: 'interrupted',
-          lastActivity: getLocalISOString(),
-          runningAgents: [],
-          failedAgents: Array.from(failedAgents)
-        });
-      } else {
-        await updateSession(activeSessionId, { status: 'interrupted', lastActivity: getLocalISOString() });
-      }
-    } catch (e) {
-      // Ignore
-    }
-  }
-
-  process.exit(0);
+  gracefulShutdown(0, 'interrupted');
 });
 
-/**
- * [목적] 예기치 않은 에러 처리 및 세션 상태 업데이트.
- */
-process.on('uncaughtException', async (error) => {
+process.on('uncaughtException', (error) => {
   console.log(chalk.red('\n🔥 Uncaught Exception!'));
   console.error(error);
-
-  if (activeSessionId) {
-    try {
-      await updateSession(activeSessionId, { status: 'failed', lastActivity: getLocalISOString() });
-      console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as failed`));
-    } catch (e) {}
-  }
-
-  process.exit(1);
+  gracefulShutdown(1, 'failed');
 });
 
-process.on('unhandledRejection', async (reason, promise) => {
+process.on('unhandledRejection', (reason, promise) => {
   console.log(chalk.red('\n🔥 Unhandled Rejection at:'), promise, 'reason:', reason);
-
-  if (activeSessionId) {
-    try {
-      await updateSession(activeSessionId, { status: 'failed', lastActivity: getLocalISOString() });
-    } catch (e) {}
-  }
-
-  process.exit(1);
+  gracefulShutdown(1, 'failed');
 });
+
+// Cleanup on normal exit
+process.on('exit', cleanupResources);
 
 
 // Main orchestration function
@@ -173,16 +175,17 @@ process.on('unhandledRejection', async (reason, promise) => {
  * [입력 파라미터]
  * - webUrl (string)
  * - repoPath (string)
- * - configPath (string|null)
- * - disableLoader (boolean)
+ * - options.configPath (string|null)
+ * - options.disableLoader (boolean)
+ * - options.setupOnly (boolean)
  *
  * [반환값]
- * - Promise<void>
+ * - Promise<object|null> - 리포트 경로 객체 또는 setup-only/early-exit 시 null
  *
  * [부작용]
  * - 파일 I/O, git 작업, 네트워크 호출, 콘솔 출력
  */
-async function main(webUrl, repoPath, configPath = null, disableLoader = false) {
+async function main(webUrl, repoPath, { configPath = null, disableLoader = false, setupOnly = false } = {}) {
   // Set global flag for loader control
   global.DOKODEMODOOR_DISABLE_LOADER = disableLoader;
 
@@ -205,13 +208,11 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
   }
   console.log(chalk.gray('─'.repeat(60)));
 
-  // Parse configuration if provided
-  let distributedConfig = null;
+  // Validate configuration if provided (actual config is loaded per-agent by checkpoint-manager)
   if (configPath) {
     try {
-      const configResult = await loadConfig(configPath);
-      distributedConfig = configResult.distributedConfig;
-      console.log(chalk.green(`✅ Configuration loaded successfully`));
+      await loadConfig(configPath);
+      console.log(chalk.green(`✅ Configuration validated successfully`));
     } catch (error) {
       await logError(error, `Configuration loading from ${configPath}`);
       throw error; // Let the main error boundary handle it
@@ -229,32 +230,37 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     sourceDir = await setupLocalRepo(repoPath);
     console.log(chalk.green('✅ Local repository setup successfully'));
   } catch (error) {
-    console.log(chalk.red(`❌ Failed to setup local repository: ${error.message}`));
-    console.log(chalk.gray('This could be due to:'));
-    console.log(chalk.gray('  - Insufficient permissions'));
-    console.log(chalk.gray('  - Repository path not accessible'));
-    console.log(chalk.gray('  - Git initialization issues'));
-    console.log(chalk.gray('  - Insufficient disk space'));
-    process.exit(1);
+    throw new PentestError(
+      `Failed to setup local repository: ${error.message}`,
+      'filesystem',
+      false,
+      {
+        repoPath,
+        reasons: [
+          'Insufficient permissions',
+          'Repository path not accessible',
+          'Git initialization issues',
+          'Insufficient disk space'
+        ],
+        originalError: error.message
+      }
+    );
   }
-
-  const variables = { webUrl, repoPath, sourceDir };
 
   // Create session for tracking (in normal mode)
   const session = await createSession(webUrl, repoPath, configPath, sourceDir);
   activeSessionId = session.id; // Set active session ID for global handlers
   console.log(chalk.blue(`📝 Session created: ${session.id.substring(0, 8)}...`));
 
-
   // Persist full console output to audit logs for debugging
   try {
     const auditPath = generateAuditPath({ id: session.id, webUrl });
     await ensureDirectory(auditPath);
     const consoleLogPath = path.join(auditPath, 'console.log');
-    const consoleLogStream = fs.createWriteStream(consoleLogPath, { flags: 'a' });
+    consoleLogStream = fs.createWriteStream(consoleLogPath, { flags: 'a' });
 
-    const origStdoutWrite = process.stdout.write.bind(process.stdout);
-    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    origStdoutWrite = process.stdout.write.bind(process.stdout);
+    origStderrWrite = process.stderr.write.bind(process.stderr);
 
     process.stdout.write = (chunk, encoding, callback) => {
       consoleLogStream.write(chunk);
@@ -270,53 +276,15 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     console.log(chalk.yellow(`⚠️  Failed to initialize console log file: ${error.message}`));
   }
 
-  // If setup-only mode, exit after session creation
-  if (process.argv.includes('--setup-only')) {
+  // If setup-only mode, return after session creation
+  if (setupOnly) {
     console.log(chalk.green('✅ Setup complete! Local repository setup and session created.'));
-    console.log(chalk.gray('Use developer commands to run individual agents:'));
-    console.log(chalk.gray('  ./dokodemodoor.mjs --run-agent pre-recon'));
+    console.log(chalk.gray('Use developer commands to run individual phases or agents:'));
+    console.log(chalk.gray('  ./dokodemodoor.mjs --run-phase pre-reconnaissance --session <id>'));
+    console.log(chalk.gray('  ./dokodemodoor.mjs --rerun pre-recon --session <id>'));
     console.log(chalk.gray('  ./dokodemodoor.mjs --status'));
-    process.exit(0);
+    return null;
   }
-
-  // Helper function to update session progress
-  /**
-   * [목적] 에이전트 완료 후 세션 상태 업데이트.
-   *
-   * [호출자]
-   * - main() 각 에이전트 완료 시
-   *
-   * [출력 대상]
-   * - updateSession()으로 세션 저장
-   *
-   * [입력 파라미터]
-   * - agentName (string)
-   * - commitHash (string|null)
-   *
-   * [반환값]
-   * - Promise<void>
-   */
-  const updateSessionProgress = async (agentName, commitHash = null) => {
-    try {
-      const updates = {
-        completedAgents: [...new Set([...session.completedAgents, agentName])],
-        skippedAgents: (session.skippedAgents || []).filter(name => name !== agentName),
-        failedAgents: session.failedAgents.filter(name => name !== agentName), // Remove from failed if it was there
-        status: 'in-progress'
-      };
-
-      if (commitHash) {
-        updates.checkpoints = { ...session.checkpoints, [agentName]: commitHash };
-      }
-
-      await updateSession(session.id, updates);
-      // Update local session object for subsequent updates
-      Object.assign(session, updates);
-      console.log(chalk.gray(`    📝 Session updated: ${agentName} completed`));
-    } catch (error) {
-      console.log(chalk.yellow(`    ⚠️ Failed to update session: ${error.message}`));
-    }
-  };
 
   // Create outputs directory in source directory
   try {
@@ -337,25 +305,28 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
   const nextAgent = getNextAgent(session);
   if (!nextAgent) {
     console.log(chalk.green(`✅ All agents completed! Session is finished.`));
-    await displayTimingSummary(timingResults, costResults, session.completedAgents);
-    process.exit(0);
+    displayTimingSummary();
+    return null;
   }
 
+  const pipelineAgents = new Set(Object.values(PHASES).flat());
   const completedCount = new Set([
     ...(session.completedAgents || []),
     ...(session.skippedAgents || [])
-  ]).size;
-  console.log(chalk.blue(`🔄 Continuing from ${nextAgent.displayName} (${completedCount}/${Object.keys(AGENTS).length} agents completed)`));
+  ].filter(name => pipelineAgents.has(name))).size;
+  console.log(chalk.blue(`🔄 Continuing from ${nextAgent.displayName} (${completedCount}/${pipelineAgents.size} agents completed)`));
 
   // Determine which phase to start from based on next agent
   const startPhase = getPhaseIndexForAgent(nextAgent.name);
 
   // PHASE 1: PRE-RECONNAISSANCE
   if (startPhase <= 1) {
+    console.log(chalk.blue.bold('\n🔍 PHASE 1: PRE-RECONNAISSANCE'));
     const preReconTimer = new Timer('phase-1-pre-recon');
     await runPhase('pre-reconnaissance', session, runAgentPromptWithRetry, loadPrompt);
     const preReconDuration = preReconTimer.stop();
     timingResults.phases['pre-recon'] = preReconDuration;
+    console.log(chalk.green(`✅ Pre-reconnaissance phase complete in ${formatDuration(preReconDuration)}`));
   }
 
   // PHASE 2: RECONNAISSANCE
@@ -389,10 +360,11 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
 
     await runPhase('vulnerability-analysis', session, runAgentPromptWithRetry, loadPrompt);
 
-    // Display vulnerability analysis summary
+    // Display vulnerability analysis summary (actual vuln counts are in queue files/deliverables)
     const currentSession = await getSession(session.id);
     const vulnSummary = calculateVulnerabilityAnalysisSummary(currentSession);
-    console.log(chalk.blue(`\n📊 Vulnerability Analysis Summary: ${vulnSummary.totalAnalyses} analyses, ${vulnSummary.totalVulnerabilities} vulnerabilities found, ${vulnSummary.exploitationCandidates} ready for exploitation`));
+    const vulnAgentTotal = PHASES['vulnerability-analysis'].length;
+    console.log(chalk.blue(`\n📊 Vulnerability Analysis Summary: ${vulnSummary.totalAnalyses}/${vulnAgentTotal} agents completed (see deliverables for detailed findings)`));
 
     const vulnDuration = vulnTimer.stop();
     timingResults.phases['vulnerability-analysis'] = vulnDuration;
@@ -400,15 +372,13 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     console.log(chalk.green(`✅ Vulnerability analysis phase complete in ${formatDuration(vulnDuration)}`));
   }
 
-
   // PHASE 5: EXPLOITATION
   if (startPhase <= 5) {
     const exploitTimer = new Timer('phase-5-exploitation');
     console.log(chalk.red.bold('\n💥 PHASE 5: EXPLOITATION'));
 
-    // Get fresh session data to ensure we have latest vulnerability analysis results
-    const freshSession = await getSession(session.id);
-    await runPhase('exploitation', freshSession, runAgentPromptWithRetry, loadPrompt);
+    // runPhase internally fetches fresh session state
+    await runPhase('exploitation', session, runAgentPromptWithRetry, loadPrompt);
 
     // Display exploitation summary
     const finalSession = await getSession(session.id);
@@ -422,7 +392,6 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     const exploitDuration = exploitTimer.stop();
     timingResults.phases['exploitation'] = exploitDuration;
   }
-
 
   // PHASE 6: REPORTING
   if (startPhase <= 6) {
@@ -438,9 +407,6 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     console.log(chalk.green(`✅ Final report fully assembled in ${formatDuration(reportDuration)}`));
     console.log(chalk.cyan(`\n💡 To generate Korean translation, run: npm run translate-report`));
   }
-
-
-
 
   // Calculate final timing and cost data
   const totalDuration = timingResults.total.stop();
@@ -464,7 +430,6 @@ async function main(webUrl, repoPath, configPath = null, disableLoader = false) 
     costBreakdown
   });
   activeSessionId = null; // Clear active session after successful completion
-
 
   // Display comprehensive timing summary
   displayTimingSummary();
@@ -494,6 +459,7 @@ const {
   configPath,
   sessionId,
   disableLoader,
+  setupOnly,
   developerCommand,
   nonFlagArgs,
   showHelp: showHelpFlag,
@@ -516,9 +482,12 @@ if (developerCommand) {
   // Set global flag for loader control in developer mode too
   global.DOKODEMODOOR_DISABLE_LOADER = disableLoader;
 
-  await handleDeveloperCommand(developerCommand, nonFlagArgs, runAgentPromptWithRetry, loadPrompt, sessionId);
-
-  process.exit(0);
+  try {
+    await handleDeveloperCommand(developerCommand, nonFlagArgs, runAgentPromptWithRetry, loadPrompt, sessionId);
+    process.exit(0);
+  } catch (error) {
+    process.exit(1);
+  }
 }
 
 // Handle no arguments - show help
@@ -557,31 +526,55 @@ if (!repoPathValidation.valid) {
 // Success - show validated inputs
 console.log(chalk.green('✅ Input validation passed:'));
 console.log(chalk.gray(`   Target Web URL: ${webUrl}`));
-console.log(chalk.gray(`   Target Repository: ${repoPathValidation.path}\n`));
-console.log(chalk.gray(`   Config Path: ${configPath}\n`));
-if (disableLoader) {
-  console.log(chalk.yellow('⚙️  LOADER DISABLED - Progress indicator will not be shown\n'));
+console.log(chalk.gray(`   Target Repository: ${repoPathValidation.path}`));
+if (configPath) {
+  console.log(chalk.gray(`   Config Path: ${configPath}`));
 }
+if (disableLoader) {
+  console.log(chalk.yellow('⚙️  LOADER DISABLED - Progress indicator will not be shown'));
+}
+console.log();
 
 try {
-  const result = await main(webUrl, repoPathValidation.path, configPath, disableLoader);
-  console.log(chalk.green.bold('\n📄 FINAL REPORTS AVAILABLE:'));
-  console.log(chalk.cyan(`   English: ${result.reportPath}`));
-  if (result.reportPathKr) {
-    console.log(chalk.cyan(`   Korean:  ${result.reportPathKr}`));
+  const result = await main(webUrl, repoPathValidation.path, { configPath, disableLoader, setupOnly });
+
+  if (result) {
+    console.log(chalk.green.bold('\n📄 FINAL REPORTS AVAILABLE:'));
+    console.log(chalk.cyan(`   English: ${result.reportPath}`));
+    if (result.reportPathKr) {
+      console.log(chalk.cyan(`   Korean:  ${result.reportPathKr}`));
+    }
+    console.log(chalk.green.bold('\n📂 AUDIT LOGS AVAILABLE:'));
+    console.log(chalk.cyan(`   ${result.auditLogsPath}`));
   }
-  console.log(chalk.green.bold('\n📂 AUDIT LOGS AVAILABLE:'));
-  console.log(chalk.cyan(`   ${result.auditLogsPath}`));
 
   process.exit(0);
 
 } catch (error) {
-  // Enhanced error boundary with proper logging
+  // Mark session as failed before clearing
+  if (activeSessionId) {
+    try {
+      await updateSession(activeSessionId, { status: 'failed', lastActivity: getLocalISOString() });
+      console.log(chalk.gray(`    📝 Session ${activeSessionId.substring(0, 8)} marked as failed`));
+    } catch (e) {
+      // Ignore session update errors during error handling
+    }
+  }
+  activeSessionId = null;
+
   if (error instanceof PentestError) {
     await logError(error, 'Main execution failed');
     console.log(chalk.red.bold('\n🚨 PENTEST EXECUTION FAILED'));
     console.log(chalk.red(`   Type: ${error.type}`));
     console.log(chalk.red(`   Retryable: ${error.retryable ? 'Yes' : 'No'}`));
+
+    // Display reasons if available in context
+    if (error.context?.reasons?.length > 0) {
+      console.log(chalk.gray('   This could be due to:'));
+      error.context.reasons.forEach(reason => {
+        console.log(chalk.gray(`     - ${reason}`));
+      });
+    }
 
     if (error.retryable) {
       console.log(chalk.yellow('   Consider running the command again or checking network connectivity.'));
@@ -590,7 +583,7 @@ try {
     console.log(chalk.red.bold('\n🚨 UNEXPECTED ERROR OCCURRED'));
     console.log(chalk.red(`   Error: ${error?.message || error?.toString() || 'Unknown error'}`));
 
-    if (process.env.DEBUG) {
+    if (process.env.DOKODEMODOOR_DEBUG) {
       console.log(chalk.gray(`   Stack: ${error?.stack || 'No stack trace available'}`));
     }
   }

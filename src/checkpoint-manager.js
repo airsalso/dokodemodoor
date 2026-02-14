@@ -4,7 +4,7 @@ import { PentestError } from './error-handling.js';
 import { loadConfig } from './config/config-loader.js';
 import { executeGitCommandWithRetry, preserveDeliverables } from './utils/git-manager.js';
 import { getLocalISOString } from './utils/time-utils.js';
-import { formatDuration } from './audit/utils.js';
+import { formatDuration, DOKODEMODOOR_ROOT } from './audit/utils.js';
 import {
   AGENTS,
   PHASES,
@@ -339,6 +339,7 @@ const rollbackGitToCommit = async (targetRepo, commitHash) => {
  * - allowRerun (boolean)
  * - skipWorkspaceClean (boolean)
  * - queueData (object|null)
+ * - skipGit (boolean) - true이면 Git 체크포인트/커밋/롤백 생략 (병렬 phase용)
  *
  * [반환값]
  * - Promise<object>
@@ -349,7 +350,7 @@ const rollbackGitToCommit = async (targetRepo, commitHash) => {
  * [에러 처리]
  * - 검증/실행 실패 시 PentestError 발생
  */
-const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadPrompt, allowRerun = false, skipWorkspaceClean = false, queueData = null) => {
+const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadPrompt, allowRerun = false, skipWorkspaceClean = false, queueData = null, skipGit = false) => {
   // Validate agent first
   const agent = validateAgent(agentName);
 
@@ -662,7 +663,8 @@ const runSingleAgent = async (agentName, session, runAgentPromptWithRetry, loadP
       AGENTS[agentName].displayName,
       agentName,  // Pass agent name for snapshot creation
       getAgentColor(agentName),  // Pass color function for this agent
-      { id: session.id, webUrl: session.webUrl, repoPath: session.repoPath }  // Session metadata for audit logging
+      { id: session.id, webUrl: session.webUrl, repoPath: session.repoPath },  // Session metadata for audit logging
+      { skipGit }  // 병렬 phase에서는 git 비활성화
     );
 
     if (!result.success) {
@@ -895,12 +897,19 @@ const runParallelVuln = async (session, runAgentPromptWithRetry, loadPrompt) => 
 
   const results = await sem.map(activeAgents, async (agentName) => {
     console.log(chalk.gray(`    ▶ Starting: ${agentName}`));
-    const result = await runSingleAgent(agentName, currentSession, runAgentPromptWithRetry, loadPrompt, false, true);
+    const result = await runSingleAgent(agentName, currentSession, runAgentPromptWithRetry, loadPrompt, false, true, null, true);
     console.log(chalk.gray(`    ◀ Finished: ${agentName}`));
     return { agentName, ...result, attempts: 1 };
   });
 
   const totalDuration = Date.now() - startTime;
+
+  // 병렬 phase 완료 후 전체 산출물을 한 번에 커밋
+  const targetRepo = currentSession.targetRepo;
+  if (targetRepo) {
+    const { commitPhaseResults } = await import('./utils/git-manager.js');
+    await commitPhaseResults(targetRepo, 'vulnerability-analysis');
+  }
 
   // Process and display results in a nice table
   console.log(chalk.cyan('\n📊 Vulnerability Analysis Results'));
@@ -933,7 +942,7 @@ const runParallelVuln = async (session, runAgentPromptWithRetry, loadPrompt) => 
 
       // Show log file path for detailed review
       if (data.logFile) {
-        const relativePath = path.relative(process.cwd(), data.logFile);
+        const relativePath = path.relative(DOKODEMODOOR_ROOT, data.logFile);
         console.log(chalk.gray(`  └─ Detailed log: ${relativePath}`));
       }
     } else {
@@ -1084,12 +1093,19 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
     }
 
     console.log(chalk.gray(`    ▶ Starting: ${agentName}`));
-    const result = await runSingleAgent(agentName, freshSession, runAgentPromptWithRetry, loadPrompt, false, true, queueData);
+    const result = await runSingleAgent(agentName, freshSession, runAgentPromptWithRetry, loadPrompt, false, true, queueData, true);
     console.log(chalk.gray(`    ◀ Finished: ${agentName}`));
     return { agentName, ...result, attempts: result.attempts || 1 };
   });
 
   const totalDuration = Date.now() - startTime;
+
+  // 병렬 phase 완료 후 전체 산출물을 한 번에 커밋
+  const targetRepo = freshSession.targetRepo;
+  if (targetRepo) {
+    const { commitPhaseResults } = await import('./utils/git-manager.js');
+    await commitPhaseResults(targetRepo, 'exploitation');
+  }
 
   // Process and display results in a nice table
   console.log(chalk.cyan('\n🎯 Exploitation Results'));
@@ -1242,7 +1258,7 @@ const runParallelExploit = async (session, runAgentPromptWithRetry, loadPrompt) 
 
       // Show log file path for detailed review
       if (data.logFile) {
-        const relativePath = path.relative(process.cwd(), data.logFile);
+        const relativePath = path.relative(DOKODEMODOOR_ROOT, data.logFile);
         console.log(chalk.gray(`  └─ Detailed log: ${relativePath}`));
       }
     } else {
@@ -1461,6 +1477,10 @@ export const rerunAgent = async (agentName, session, runAgentPromptWithRetry, lo
 
   const agent = validateAgent(agentName);
 
+  // 병렬 phase(vulnerability-analysis, exploitation) 에이전트 여부 판단
+  const PARALLEL_PHASES = ['vulnerability-analysis', 'exploitation'];
+  const isParallelAgent = PARALLEL_PHASES.includes(agent.phase);
+
   if (cascade) {
     // CASCADING MODE: Rollback to prerequisite and invalidate all subsequent agents
     console.log(chalk.yellow(`⚠️  Cascade mode: All agents after ${agentName} will be rolled back`));
@@ -1494,26 +1514,33 @@ export const rerunAgent = async (agentName, session, runAgentPromptWithRetry, lo
     // ISOLATED MODE: Only rerun this specific agent without affecting others
     console.log(chalk.blue(`📍 Isolated rerun: Only ${agentName} will be affected`));
 
-    // If agent was previously completed, we need to rollback ONLY this agent
     if (session.completedAgents.includes(agentName)) {
-      // Find the checkpoint of the immediate prerequisite
-      let targetCheckpoint = null;
+      if (isParallelAgent) {
+        // 병렬 에이전트: git rollback 대신 파일 기반 deliverable 정리
+        // 최종 산출물만 삭제하고 롱텀 메모리(findings/todo.txt)는 보존
+        console.log(chalk.blue(`   📂 Using file-based cleanup for parallel agent (preserving long-term memory)`));
+        const { cleanAgentDeliverables } = await import('./utils/git-manager.js');
+        await cleanAgentDeliverables(session.targetRepo, agentName);
+      } else {
+        // 순차 에이전트: 기존 git rollback 방식 유지
+        let targetCheckpoint = null;
 
-      if (agent.prerequisites.length > 0) {
-        const completedPrereqs = agent.prerequisites.filter(prereq =>
-          session.completedAgents.includes(prereq)
-        );
-        if (completedPrereqs.length > 0) {
-          const lastPrereq = completedPrereqs.reduce((latest, current) =>
-            AGENTS[current].order > AGENTS[latest].order ? current : latest
+        if (agent.prerequisites.length > 0) {
+          const completedPrereqs = agent.prerequisites.filter(prereq =>
+            session.completedAgents.includes(prereq)
           );
-          targetCheckpoint = session.checkpoints[lastPrereq];
+          if (completedPrereqs.length > 0) {
+            const lastPrereq = completedPrereqs.reduce((latest, current) =>
+              AGENTS[current].order > AGENTS[latest].order ? current : latest
+            );
+            targetCheckpoint = session.checkpoints[lastPrereq];
+          }
         }
-      }
 
-      if (targetCheckpoint) {
-        console.log(chalk.gray(`   Restoring code to prerequisite checkpoint: ${targetCheckpoint.substring(0, 8)}`));
-        await rollbackGitToCommit(session.targetRepo, targetCheckpoint);
+        if (targetCheckpoint) {
+          console.log(chalk.gray(`   Restoring code to prerequisite checkpoint: ${targetCheckpoint.substring(0, 8)}`));
+          await rollbackGitToCommit(session.targetRepo, targetCheckpoint);
+        }
       }
 
       // Remove ONLY this agent from completedAgents (don't touch others)
@@ -1547,9 +1574,17 @@ export const rerunAgent = async (agentName, session, runAgentPromptWithRetry, lo
   }
 
   // Run the target agent (allow rerun since we've explicitly prepared for it)
-  await runSingleAgent(agentName, session, runAgentPromptWithRetry, loadPrompt, true);
+  // 병렬 에이전트는 skipGit=true로 실행
+  const skipGit = isParallelAgent && !cascade;
+  await runSingleAgent(agentName, session, runAgentPromptWithRetry, loadPrompt, true, false, null, skipGit);
 
   console.log(chalk.green(`✅ Agent '${agentName}' rerun completed successfully`));
+
+  // 병렬 에이전트 재실행 완료 후 phase 커밋
+  if (skipGit && session.targetRepo) {
+    const { commitPhaseResults } = await import('./utils/git-manager.js');
+    await commitPhaseResults(session.targetRepo, `${agentName}-rerun`);
+  }
 };
 
 // Run all remaining agents to completion

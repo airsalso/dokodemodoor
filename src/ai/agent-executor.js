@@ -932,9 +932,13 @@ async function runAgentPrompt(prompt, sourceDir, allowedTools = 'Read', context 
  * - Promise<object>
  *
  * [부작용]
- * - Git 체크포인트/롤백, audit log 기록, deliverables 생성
+ * - Git 체크포인트/롤백 (skipGit=false인 경우), audit log 기록, deliverables 생성
+ *
+ * @param {Object} [options] - 추가 옵션
+ * @param {boolean} [options.skipGit=false] - true이면 Git 체크포인트/커밋/롤백을 생략 (병렬 phase용)
  */
-export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 'Read', context = '', description = 'Agent analysis', agentName = null, colorFn = chalk.cyan, sessionMetadata = null) {
+export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 'Read', context = '', description = 'Agent analysis', agentName = null, colorFn = chalk.cyan, sessionMetadata = null, options = {}) {
+  const { skipGit = false } = options;
   const maxRetries = 3;
   let lastError;
   let retryContext = context; // Preserve context between retries
@@ -949,8 +953,10 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
   }
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    // Create checkpoint before each attempt
-    await createGitCheckpoint(sourceDir, description, attempt);
+    // Create checkpoint before each attempt (skip in parallel/no-git mode)
+    if (!skipGit) {
+      await createGitCheckpoint(sourceDir, description, attempt);
+    }
 
     // Start agent tracking in audit system (saves prompt snapshot automatically)
     if (auditSession) {
@@ -979,9 +985,14 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
             console.log(chalk.yellow(`📋 Validation: Ready for exploitation despite API error warnings`));
           }
 
-          // Commit successful changes (will include the snapshot)
-          const commitInfo = await commitGitSuccess(sourceDir, description);
-          const commitHash = commitInfo.commitHash || await getGitHeadHash(sourceDir);
+          // Commit successful changes (skip in parallel/no-git mode)
+          let commitHash = null;
+          if (!skipGit) {
+            const commitInfo = await commitGitSuccess(sourceDir, description);
+            commitHash = commitInfo.commitHash || await getGitHeadHash(sourceDir);
+          } else {
+            commitHash = await getGitHeadHash(sourceDir);
+          }
 
           // Record successful attempt in audit system
           if (auditSession) {
@@ -1039,8 +1050,10 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
           }
 
           if (attempt < maxRetries) {
-            // Rollback contaminated workspace
-            await rollbackGitWorkspace(sourceDir, 'validation failure');
+            // Rollback contaminated workspace (skip in parallel/no-git mode)
+            if (!skipGit) {
+              await rollbackGitWorkspace(sourceDir, 'validation failure');
+            }
             continue;
           } else {
             // FAIL FAST - Don't continue with broken pipeline
@@ -1073,13 +1086,17 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
       // Check if error is retryable
       if (!isRetryableError(error)) {
         console.log(chalk.red(`❌ ${description} failed with non-retryable error: ${error.message}`));
-        await rollbackGitWorkspace(sourceDir, 'non-retryable error cleanup');
+        if (!skipGit) {
+          await rollbackGitWorkspace(sourceDir, 'non-retryable error cleanup');
+        }
         throw error;
       }
 
       if (attempt < maxRetries) {
-        // Rollback for clean retry
-        await rollbackGitWorkspace(sourceDir, 'retryable error cleanup');
+        // Rollback for clean retry (skip in parallel/no-git mode)
+        if (!skipGit) {
+          await rollbackGitWorkspace(sourceDir, 'retryable error cleanup');
+        }
 
         const delay = getRetryDelay(error, attempt);
         const delaySeconds = (delay / 1000).toFixed(1);
@@ -1096,7 +1113,9 @@ export async function runAgentPromptWithRetry(prompt, sourceDir, allowedTools = 
         await new Promise(resolve => setTimeout(resolve, delay));
       } else {
         const finalErrorMsg = error?.message || String(error) || 'Unknown error';
-        await rollbackGitWorkspace(sourceDir, 'final failure cleanup');
+        if (!skipGit) {
+          await rollbackGitWorkspace(sourceDir, 'final failure cleanup');
+        }
         console.log(chalk.red(`❌ ${description} failed after ${maxRetries} attempts`));
         console.log(chalk.red(`    Final error: ${finalErrorMsg}`));
       }

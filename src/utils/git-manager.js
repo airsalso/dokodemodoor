@@ -359,3 +359,128 @@ export const rollbackGitWorkspace = async (sourceDir, reason = 'retry preparatio
     return { success: false, error };
   }
 };
+
+// ─────────────────────────────────────────────
+// 병렬 phase 지원: 에이전트별 deliverable 정리 & phase 단위 커밋
+// ─────────────────────────────────────────────
+
+/**
+ * [목적] 에이전트의 최종 산출물만 삭제하고 롱텀 메모리(findings)는 보존.
+ *
+ * 병렬 phase에서 에이전트 재실행(--rerun) 시 git rollback 대신 사용.
+ * - 최종 산출물 (A): *_queue.json, *_evidence.json, *_deliverable.md 등 → 삭제
+ * - 롱텀 메모리 (B): deliverables/findings/<agent>/ (todo.txt, finding_*.md) → 보존
+ *
+ * [호출자]
+ * - checkpoint-manager.js::rerunAgent() (병렬 에이전트 재실행 시)
+ *
+ * @param {string} sourceDir - 대상 프로젝트 디렉토리 (repos/juice-shop 등)
+ * @param {string} agentName - 에이전트 이름 (e.g., 'sqli-vuln', 'sqli-exploit')
+ * @returns {Promise<{success: boolean, deletedFiles: string[]}>}
+ */
+export const cleanAgentDeliverables = async (sourceDir, agentName) => {
+  const deliverablesDir = path.join(sourceDir, 'deliverables');
+  const deletedFiles = [];
+
+  try {
+    if (!await fs.pathExists(deliverablesDir)) {
+      return { success: true, deletedFiles };
+    }
+
+    // 에이전트 이름에서 취약점 타입 추출
+    // 'sqli-vuln' → 'sqli', 'sqli-exploit' → 'sqli', 'auth-vuln' → 'auth'
+    const vulnType = agentName.replace(/-vuln$/, '').replace(/-exploit$/, '');
+    const isExploit = agentName.endsWith('-exploit');
+
+    // 최종 산출물 파일 패턴 (A) - 삭제 대상
+    const patterns = isExploit
+      ? [
+          `${vulnType}_exploitation_evidence.json`,
+          `${vulnType}_exploitation_evidence.md`,
+        ]
+      : [
+          `${vulnType}_exploitation_queue.json`,
+          `${vulnType}_vuln_deliverable.md`,
+          `${vulnType}_vulnerability_report.md`,
+        ];
+
+    for (const pattern of patterns) {
+      const filePath = path.join(deliverablesDir, pattern);
+      if (await fs.pathExists(filePath)) {
+        await fs.remove(filePath);
+        deletedFiles.push(pattern);
+      }
+    }
+
+    if (deletedFiles.length > 0) {
+      console.log(chalk.yellow(`    🧹 Cleaned ${deletedFiles.length} deliverable(s) for ${agentName}:`));
+      deletedFiles.forEach(f => console.log(chalk.gray(`       - ${f}`)));
+    } else {
+      console.log(chalk.gray(`    ℹ️  No deliverables to clean for ${agentName}`));
+    }
+
+    // 롱텀 메모리(findings)는 명시적으로 보존
+    const findingsDir = path.join(deliverablesDir, 'findings');
+    const missionName = vulnType;
+    const missionDir = isExploit
+      ? path.join(findingsDir, `${missionName}-exploit`)
+      : path.join(findingsDir, missionName);
+
+    if (await fs.pathExists(missionDir)) {
+      console.log(chalk.blue(`    💾 Preserved long-term memory: findings/${isExploit ? missionName + '-exploit' : missionName}/`));
+    }
+
+    return { success: true, deletedFiles };
+  } catch (error) {
+    console.log(chalk.yellow(`    ⚠️ Deliverable cleanup failed for ${agentName}: ${error.message}`));
+    return { success: false, deletedFiles, error };
+  }
+};
+
+/**
+ * [목적] 병렬 phase 완료 후 전체 산출물을 한 번에 커밋.
+ *
+ * 병렬 에이전트 실행 중에는 git 커밋을 하지 않고,
+ * phase 완료 후 이 함수로 한 번에 커밋합니다.
+ *
+ * [호출자]
+ * - checkpoint-manager.js::runPhase() (병렬 phase 완료 후)
+ *
+ * @param {string} sourceDir - 대상 프로젝트 디렉토리
+ * @param {string} phaseName - phase 이름 (e.g., 'vulnerability-analysis')
+ * @returns {Promise<{success: boolean, commitHash?: string}>}
+ */
+export const commitPhaseResults = async (sourceDir, phaseName) => {
+  console.log(chalk.green(`    💾 Creating phase-level commit for '${phaseName}'`));
+  try {
+    const status = await executeGitCommandWithRetry(
+      ['git', 'status', '--porcelain'], sourceDir, 'status check for phase commit'
+    );
+    const changes = status.stdout.trim().split('\n').filter(line => line.length > 0);
+
+    await executeGitCommandWithRetry(
+      ['git', 'add', '-A'], sourceDir, 'staging phase results'
+    );
+
+    await executeGitCommandWithRetry(
+      ['git', 'commit', '-m', `📦 Phase commit: ${phaseName} completed`, '--allow-empty'],
+      sourceDir, 'creating phase commit'
+    );
+
+    const headResult = await executeGitCommandWithRetry(
+      ['git', 'rev-parse', 'HEAD'], sourceDir, 'getting phase commit hash'
+    );
+    const commitHash = headResult.stdout.trim();
+
+    if (changes.length > 0) {
+      console.log(chalk.green(`    ✅ Phase commit created with ${changes.length} file changes`));
+    } else {
+      console.log(chalk.green(`    ✅ Empty phase commit created (no file changes)`));
+    }
+
+    return { success: true, commitHash };
+  } catch (error) {
+    console.log(chalk.yellow(`    ⚠️ Phase commit failed: ${error.message}`));
+    return { success: false, error };
+  }
+};

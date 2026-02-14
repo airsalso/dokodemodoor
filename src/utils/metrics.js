@@ -56,7 +56,10 @@ export const usageResults = {
  * - 메인 실행 종료 시
  */
 export const displayTimingSummary = () => {
-  const totalDuration = timingResults.total.stop();
+  // Use already-stopped duration if available, otherwise stop now
+  const totalDuration = timingResults.total.endTime
+    ? timingResults.total.duration()
+    : timingResults.total.stop();
 
   console.log(chalk.cyan.bold('\n⏱️  TIMING SUMMARY'));
   console.log(chalk.gray('─'.repeat(60)));

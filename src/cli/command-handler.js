@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import {
-  selectSession, deleteSession, deleteAllSessions,
+  deleteSession, deleteAllSessions,
   validateAgent, validatePhase, reconcileSession,
   findSessionByIdOrSelection
 } from '../session-manager.js';
@@ -31,7 +31,10 @@ import { promptConfirmation } from './prompts.js';
  * - Promise<void>
  *
  * [부작용]
- * - 세션 선택/수정, 로그 출력, 프로세스 종료
+ * - 세션 선택/수정, 로그 출력
+ *
+ * [에러 처리]
+ * - 에러 발생 시 로깅 후 re-throw (호출자가 exit 관리)
  */
 export async function handleDeveloperCommand(command, args, runAgentPromptWithRetry, loadPrompt, providedSessionId = null) {
   try {
@@ -72,29 +75,30 @@ export async function handleDeveloperCommand(command, args, runAgentPromptWithRe
 
     if (command === '--run-phase') {
       if (!args[0]) {
-        console.log(chalk.red('❌ --run-phase requires a phase name'));
-        console.log(chalk.gray('Usage: ./dokodemodoor.mjs --run-phase <phase-name>'));
-        process.exit(1);
+        throw new PentestError(
+          '--run-phase requires a phase name',
+          'cli',
+          false,
+          { usage: './dokodemodoor.mjs --run-phase <phase-name>' }
+        );
       }
       validatePhase(args[0]); // This will throw PentestError if invalid
     }
 
     if (command === '--rollback-to' || command === '--rerun') {
       if (!args[0]) {
-        console.log(chalk.red(`❌ ${command} requires an agent name`));
-        console.log(chalk.gray(`Usage: ./dokodemodoor.mjs ${command} <agent-name>`));
-        process.exit(1);
+        throw new PentestError(
+          `${command} requires an agent name`,
+          'cli',
+          false,
+          { usage: `./dokodemodoor.mjs ${command} <agent-name>` }
+        );
       }
       validateAgent(args[0]); // This will throw PentestError if invalid
     }
 
     // Get session for other commands
-    try {
-      session = await findSessionByIdOrSelection(providedSessionId);
-    } catch (error) {
-      console.log(chalk.red(`❌ ${error.message}`));
-      process.exit(1);
-    }
+    session = await findSessionByIdOrSelection(providedSessionId);
 
     // Self-healing: Reconcile session with audit logs before executing command
     // This ensures DokodemoDoor store is consistent with audit data, even after crash recovery
@@ -145,9 +149,12 @@ export async function handleDeveloperCommand(command, args, runAgentPromptWithRe
         break;
 
       default:
-        console.log(chalk.red(`❌ Unknown developer command: ${command}`));
-        console.log(chalk.gray('Use --help to see available commands'));
-        process.exit(1);
+        throw new PentestError(
+          `Unknown developer command: ${command}`,
+          'cli',
+          false,
+          { hint: 'Use --help to see available commands' }
+        );
     }
   } catch (error) {
     if (error instanceof PentestError) {
@@ -159,6 +166,6 @@ export async function handleDeveloperCommand(command, args, runAgentPromptWithRe
         console.log(chalk.gray(error.stack));
       }
     }
-    process.exit(1);
+    throw error; // Re-throw to let caller handle exit
   }
 }

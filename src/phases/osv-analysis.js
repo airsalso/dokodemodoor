@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import { PentestError } from '../error-handling.js';
 import { getAgentName, getTargetDir } from '../utils/context.js';
 import { getLogTimestamp } from '../utils/time-utils.js';
+import { DOKODEMODOOR_ROOT } from '../audit/utils.js';
 
 // ─────────────────────────────────────────────
 // OSV Ecosystem Map (internal type → OSV API ecosystem name)
@@ -900,7 +901,7 @@ export async function queryOsvBatch(deps, ecosystemType, sourceDir) {
       const timestamp = getLogTimestamp();
       const logEntry = `[${timestamp}] Project: ${projectName} | OSV Request: ecosystem=${ecosystem}, package=${dep.name}, version=${dep.version}\n`;
       try {
-        const osvLogDir = path.join(process.cwd(), 'osv-logs');
+        const osvLogDir = path.join(DOKODEMODOOR_ROOT, 'osv-logs');
         if (!await fs.pathExists(osvLogDir)) await fs.ensureDir(osvLogDir);
         await fs.appendFile(path.join(osvLogDir, 'outbound_osv_requests.log'), logEntry);
       } catch (err) {

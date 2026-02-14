@@ -8,6 +8,8 @@ const DEVELOPER_COMMANDS = Object.freeze([
   '--cleanup'
 ]);
 
+const SETUP_ONLY_FLAG = '--setup-only';
+
 const HELP_FLAGS = new Set(['--help', '-h', 'help']);
 
 /**
@@ -42,6 +44,7 @@ export const parseCliArgs = (args, { defaultDisableLoader } = {}) => {
     configPath: null,
     sessionId: null,
     disableLoader: Boolean(defaultDisableLoader),
+    setupOnly: false,
     developerCommand: null,
     nonFlagArgs: [],
     showHelp: args.some(arg => HELP_FLAGS.has(arg)),
@@ -76,6 +79,11 @@ export const parseCliArgs = (args, { defaultDisableLoader } = {}) => {
       continue;
     }
 
+    if (arg === SETUP_ONLY_FLAG) {
+      parsed.setupOnly = true;
+      continue;
+    }
+
     if (DEVELOPER_COMMANDS.includes(arg)) {
       parsed.developerCommand = arg;
       const remainingArgs = args.slice(i + 1);
@@ -84,6 +92,10 @@ export const parseCliArgs = (args, { defaultDisableLoader } = {}) => {
         const remainingArg = remainingArgs[j];
 
         if (remainingArg === '--session') {
+          if (j + 1 >= remainingArgs.length) {
+            parsed.error = '❌ --session flag requires a session ID';
+            break;
+          }
           parsed.sessionId = remainingArgs[j + 1];
           j += 1;
           continue;
@@ -91,6 +103,11 @@ export const parseCliArgs = (args, { defaultDisableLoader } = {}) => {
 
         if (remainingArg === '--disable-loader') {
           parsed.disableLoader = true;
+          continue;
+        }
+
+        if (remainingArg === SETUP_ONLY_FLAG) {
+          parsed.setupOnly = true;
           continue;
         }
 

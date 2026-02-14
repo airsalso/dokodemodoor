@@ -2,10 +2,10 @@ import { fs, path } from 'zx';
 import chalk from 'chalk';
 import crypto from 'crypto';
 import { PentestError } from './error-handling.js';
-import { SessionMutex } from './utils/concurrency.js';
+import { FileLock } from './utils/file-lock.js';
 import { promptSelection } from './cli/prompts.js';
 import { getLocalISOString } from './utils/time-utils.js';
-import { generateAuditPath } from './audit/utils.js';
+import { generateAuditPath, DOKODEMODOOR_ROOT } from './audit/utils.js';
 
 // Generate a session-based log folder path
 // NEW FORMAT: {hostname}_{sessionId} (no hash, full UUID for consistency with audit system)
@@ -37,10 +37,8 @@ export const generateSessionLogPath = (webUrl, sessionId) => {
     // Fallback if URL parsing fails
   }
   const sessionFolderName = `${hostname}_${sessionId}`;
-  return path.join(process.cwd(), 'audit-logs', sessionFolderName);
+  return path.join(DOKODEMODOOR_ROOT, 'audit-logs', sessionFolderName);
 };
-
-const sessionMutex = new SessionMutex();
 
 // Agent definitions according to PRD
 export const AGENTS = Object.freeze({
@@ -325,7 +323,17 @@ export const getPhaseIndexForAgent = (agentName) => {
 };
 
 // Session store file path
-const STORE_FILE = path.join(process.cwd(), '.dokodemodoor-store.json');
+const STORE_FILE = path.join(DOKODEMODOOR_ROOT, '.dokodemodoor-store.json');
+
+// 파일 기반 락: 여러 프로세스가 동시에 세션 스토어에 접근할 때 상호 배제 보장
+const storeLock = new FileLock(`${STORE_FILE}.lock`, {
+  staleMs: 60000,        // 60초 이상 유지된 락은 stale 처리
+  retryIntervalMs: 50,   // 50ms + jitter 간격으로 재시도
+  timeoutMs: 15000       // 15초 타임아웃
+});
+
+// Stale 세션 판단 기준 (60분)
+const STALE_THRESHOLD_MS = 1000 * 60 * 60;
 
 // Load sessions from store file
 /**
@@ -419,11 +427,20 @@ const saveSessions = async (store) => {
  * [반환값]
  * - Promise<object|null>
  */
-const findExistingSession = async (webUrl, targetRepo) => {
-  const store = await loadSessions();
+/**
+ * [목적] 이미 로드된 스토어에서 기존 세션 탐색 (내부 헬퍼).
+ *
+ * [호출자]
+ * - createSession() 내부 (락 보유 상태에서 호출)
+ * - findExistingSession() 래퍼
+ *
+ * @param {object} store - 로드된 세션 스토어
+ * @param {string} webUrl
+ * @param {string} targetRepo
+ * @returns {object|null}
+ */
+const _findExistingSessionFromStore = (store, webUrl, targetRepo) => {
   const sessions = Object.values(store.sessions);
-
-  // Normalize paths for comparison
   const normalizedTargetRepo = path.resolve(targetRepo);
 
   const matches = sessions.filter(session => {
@@ -431,21 +448,21 @@ const findExistingSession = async (webUrl, targetRepo) => {
     return session.webUrl === webUrl && normalizedSessionRepo === normalizedTargetRepo;
   });
 
-  if (matches.length === 0) {
-    return null;
-  }
+  if (matches.length === 0) return null;
 
-  // Filter out sessions that are already functionally complete
   const activeSessions = matches.filter(session => {
     const { isPipelineComplete } = getSessionStatus(session);
     return !isPipelineComplete;
   });
 
-  if (activeSessions.length === 0) {
-    return null;
-  }
+  if (activeSessions.length === 0) return null;
 
   return activeSessions.sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity))[0];
+};
+
+const findExistingSession = async (webUrl, targetRepo) => {
+  const store = await loadSessions();
+  return _findExistingSessionFromStore(store, webUrl, targetRepo);
 };
 
 // Generate session ID as unique UUID
@@ -492,79 +509,82 @@ const generateSessionId = () => {
  * - Throws PentestError on store persistence failures.
  */
 export const createSession = async (webUrl, repoPath, configFile = null, targetRepo = null) => {
-  // Use targetRepo if provided, otherwise use repoPath
   const resolvedTargetRepo = targetRepo || repoPath;
 
-  // Check for existing session first
-  const existingSession = await findExistingSession(webUrl, resolvedTargetRepo);
+  return storeLock.withLock(async () => {
+    const store = await loadSessions();
 
-  if (existingSession) {
-    // If session is not completed, reuse it
-    if (existingSession.status !== 'completed') {
-      console.log(chalk.blue(`📝 Reusing existing session: ${existingSession.id.substring(0, 8)}...`));
-      const pipelineAgents = new Set(Object.values(PHASES).flat());
-      const completedCount = new Set([
-        ...(existingSession.completedAgents || []),
-        ...(existingSession.skippedAgents || [])
-      ].filter(name => pipelineAgents.has(name))).size;
+    // 락 내부에서 기존 세션 탐색 (TOCTOU 방지)
+    const existingSession = _findExistingSessionFromStore(store, webUrl, resolvedTargetRepo);
 
-      console.log(chalk.gray(`   Progress: ${completedCount}/${pipelineAgents.size} agents completed`));
+    if (existingSession) {
+      if (existingSession.status !== 'completed') {
+        console.log(chalk.blue(`📝 Reusing existing session: ${existingSession.id.substring(0, 8)}...`));
+        const pipelineAgents = new Set(Object.values(PHASES).flat());
+        const completedCount = new Set([
+          ...(existingSession.completedAgents || []),
+          ...(existingSession.skippedAgents || [])
+        ].filter(name => pipelineAgents.has(name))).size;
 
-      // Update last activity and ensure status is 'in-progress' upon reuse
-      await updateSession(existingSession.id, {
-        status: 'in-progress',
-        lastActivity: getLocalISOString()
-      });
-      return existingSession;
+        console.log(chalk.gray(`   Progress: ${completedCount}/${pipelineAgents.size} agents completed`));
 
+        // 같은 트랜잭션 내에서 직접 업데이트 (updateSession 호출 시 데드락 방지)
+        store.sessions[existingSession.id] = {
+          ...store.sessions[existingSession.id],
+          status: 'in-progress',
+          lastActivity: getLocalISOString()
+        };
+        await saveSessions(store);
+        return store.sessions[existingSession.id];
+      }
+
+      console.log(chalk.gray(`Previous session was completed, creating new session...`));
     }
 
-    // If completed, create a new session (allows re-running after completion)
-    console.log(chalk.gray(`Previous session was completed, creating new session...`));
-  }
+    const sessionId = generateSessionId();
 
-  const sessionId = generateSessionId();
+    // STANDARD: All sessions use 'id' field (NOT 'sessionId')
+    // This is the canonical session structure used throughout the codebase
+    const session = {
+      id: sessionId,
+      webUrl,
+      repoPath,
+      configFile,
+      targetRepo: resolvedTargetRepo,
+      status: 'in-progress',
+      completedAgents: [],
+      skippedAgents: [],
+      failedAgents: [],
+      runningAgents: [],
+      checkpoints: {},
+      createdAt: getLocalISOString(),
+      lastActivity: getLocalISOString()
+    };
 
-  // STANDARD: All sessions use 'id' field (NOT 'sessionId')
-  // This is the canonical session structure used throughout the codebase
-  const session = {
-    id: sessionId,
-    webUrl,
-    repoPath,
-    configFile,
-    targetRepo: resolvedTargetRepo,
-    status: 'in-progress',
-    completedAgents: [],
-    skippedAgents: [],
-    failedAgents: [],
-    runningAgents: [],
-    checkpoints: {},
-    createdAt: getLocalISOString(),
-    lastActivity: getLocalISOString()
-  };
+    store.sessions[sessionId] = session;
 
-  const store = await loadSessions();
-  store.sessions[sessionId] = session;
-  await saveSessions(store);
+    // 같은 트랜잭션 내에서 stale 세션 정리 (별도 load/save 불필요)
+    _markStaleSessions(store, sessionId);
 
-  // Auto-cleanup stale sessions on new session creation
-  // This handles sessions that were 'in-progress' but crashed/killed without cleanup
-  await cleanupStaleSessions(sessionId);
-
-  return session;
+    await saveSessions(store);
+    return session;
+  });
 };
 
 /**
- * [목적] 장시간 활동이 없는 'in-progress' 세션들을 'interrupted'로 정리.
+ * [목적] Stale 세션을 'interrupted'로 표시하는 내부 헬퍼 (store 객체를 직접 수정).
  *
- * @param {string} currentSessionId - 현재 실행 중인 세션 ID (정리 대상에서 제외)
+ * [호출자]
+ * - createSession() (같은 트랜잭션 내에서)
+ * - cleanupStaleSessions() 래퍼
+ *
+ * @param {object} store - 로드된 세션 스토어 (in-place 수정)
+ * @param {string|null} currentSessionId - 정리 대상에서 제외할 세션 ID
+ * @returns {boolean} 변경 사항 존재 여부
  */
-export const cleanupStaleSessions = async (currentSessionId = null) => {
-  const store = await loadSessions();
+const _markStaleSessions = (store, currentSessionId = null) => {
   let updated = false;
   const now = new Date();
-  const STALE_THRESHOLD_MS = 1000 * 60 * 60; // 60 minutes (1 hour)
-
 
   for (const id in store.sessions) {
     if (id === currentSessionId) continue;
@@ -585,9 +605,21 @@ export const cleanupStaleSessions = async (currentSessionId = null) => {
     }
   }
 
-  if (updated) {
-    await saveSessions(store);
-  }
+  return updated;
+};
+
+/**
+ * [목적] 장시간 활동이 없는 'in-progress' 세션들을 'interrupted'로 정리.
+ *
+ * @param {string} currentSessionId - 현재 실행 중인 세션 ID (정리 대상에서 제외)
+ */
+export const cleanupStaleSessions = async (currentSessionId = null) => {
+  return storeLock.withLock(async () => {
+    const store = await loadSessions();
+    if (_markStaleSessions(store, currentSessionId)) {
+      await saveSessions(store);
+    }
+  });
 };
 
 
@@ -640,9 +672,7 @@ export const getSession = async (sessionId) => {
  * - Writes session store to disk.
  */
 export const updateSession = async (sessionId, updates) => {
-  // Use lock to ensure atomic update
-  const unlock = await sessionMutex.lock(sessionId);
-  try {
+  return storeLock.withLock(async () => {
     const store = await loadSessions();
 
     if (!store.sessions[sessionId]) {
@@ -677,9 +707,7 @@ export const updateSession = async (sessionId, updates) => {
 
     await saveSessions(store);
     return store.sessions[sessionId];
-  } finally {
-    unlock();
-  }
+  });
 };
 
 // List all sessions
@@ -1533,30 +1561,32 @@ export const reconcileSession = async (sessionId, options = {}) => {
  * - Filesystem cleanup of session artifacts.
  */
 export const deleteSession = async (sessionId) => {
-  const store = await loadSessions();
+  return storeLock.withLock(async () => {
+    const store = await loadSessions();
 
-  if (!store.sessions[sessionId]) {
-    throw new PentestError(
-      `Session ${sessionId} not found`,
-      'validation',
-      false,
-      { sessionId }
-    );
-  }
+    if (!store.sessions[sessionId]) {
+      throw new PentestError(
+        `Session ${sessionId} not found`,
+        'validation',
+        false,
+        { sessionId }
+      );
+    }
 
-  const deletedSession = store.sessions[sessionId];
+    const deletedSession = store.sessions[sessionId];
 
-  // Physical cleanup of session artifacts
-  try {
-    await cleanupSessionArtifacts(deletedSession);
-  } catch (cleanupError) {
-    console.log(chalk.yellow(`⚠️ Partial cleanup for session ${sessionId}: ${cleanupError.message}`));
-  }
+    // Physical cleanup of session artifacts
+    try {
+      await cleanupSessionArtifacts(deletedSession);
+    } catch (cleanupError) {
+      console.log(chalk.yellow(`⚠️ Partial cleanup for session ${sessionId}: ${cleanupError.message}`));
+    }
 
-  delete store.sessions[sessionId];
-  await saveSessions(store);
+    delete store.sessions[sessionId];
+    await saveSessions(store);
 
-  return deletedSession;
+    return deletedSession;
+  });
 };
 
 // Delete all sessions (remove entire storage)
@@ -1579,35 +1609,37 @@ export const deleteSession = async (sessionId) => {
  * - Throws PentestError on filesystem failures.
  */
 export const deleteAllSessions = async () => {
-  try {
-    const store = await loadSessions();
-    const sessions = Object.values(store.sessions || {});
+  return storeLock.withLock(async () => {
+    try {
+      const store = await loadSessions();
+      const sessions = Object.values(store.sessions || {});
 
-    if (sessions.length > 0) {
-      for (const session of sessions) {
-        try {
-          await cleanupSessionArtifacts(session);
-        } catch (cleanupError) {
-          console.log(chalk.yellow(`⚠️ Partial cleanup for session ${session.id}: ${cleanupError.message}`));
+      if (sessions.length > 0) {
+        for (const session of sessions) {
+          try {
+            await cleanupSessionArtifacts(session);
+          } catch (cleanupError) {
+            console.log(chalk.yellow(`⚠️ Partial cleanup for session ${session.id}: ${cleanupError.message}`));
+          }
         }
+      } else {
+        await cleanupOrphanArtifacts();
       }
-    } else {
-      await cleanupOrphanArtifacts();
-    }
 
-    if (await fs.pathExists(STORE_FILE)) {
-      await fs.remove(STORE_FILE);
+      if (await fs.pathExists(STORE_FILE)) {
+        await fs.remove(STORE_FILE);
+        return sessions.length > 0;
+      }
       return sessions.length > 0;
+    } catch (error) {
+      throw new PentestError(
+        `Failed to delete session storage: ${error.message}`,
+        'filesystem',
+        false,
+        { storeFile: STORE_FILE, originalError: error.message }
+      );
     }
-    return sessions.length > 0;
-  } catch (error) {
-    throw new PentestError(
-      `Failed to delete session storage: ${error.message}`,
-      'filesystem',
-      false,
-      { storeFile: STORE_FILE, originalError: error.message }
-    );
-  }
+  });
 };
 
 /**
@@ -1663,8 +1695,7 @@ const cleanupSessionArtifacts = async (session) => {
  * - Promise<void>
  */
 const cleanupOrphanArtifacts = async () => {
-  const rootDir = process.cwd();
-
+  const rootDir = DOKODEMODOOR_ROOT;
 
   const auditLogsPath = path.join(rootDir, 'audit-logs');
   if (await fs.pathExists(auditLogsPath)) {
